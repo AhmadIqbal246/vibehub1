@@ -47,6 +47,11 @@ class CurrentUserApi(APIView):
             'first_name': user.first_name,
             'last_name': user.last_name,
             'phone_number': profile.phone_number if profile else "",
+            'profile_picture_url': profile.profile_picture_url if profile else "",
+            'bio': profile.bio if profile else "",
+            'date_of_birth': profile.date_of_birth if profile else None,
+            'gender': profile.gender if profile else "",
+            'gender_display': profile.get_gender_display() if profile and profile.gender else "",
         })
 
 
@@ -63,20 +68,42 @@ class UpdateUserProfile(APIView):
 
     def put(self, request):
         user = request.user
-        data = request.data
-        username = request.data.get("username")
-        phone = request.data.get("phone_number")
+        profile = user.userprofile
 
-        user.username = username or user.username
-        user.first_name = data.get("first_name", user.first_name)
-        user.last_name = data.get("last_name", user.last_name)
+        user.username = request.data.get("username", user.username)
+        user.first_name = request.data.get("first_name", user.first_name)
+        user.last_name = request.data.get("last_name", user.last_name)
         user.save()
 
-        profile = user.userprofile
-        profile.phone_number = phone or profile.phone_number
+        profile.phone_number = request.data.get("phone_number", profile.phone_number)
+        profile.bio = request.data.get("bio", profile.bio)
+        profile.gender = request.data.get("gender", profile.gender)
+        
+        # Handle date of birth
+        date_of_birth = request.data.get("date_of_birth")
+        if date_of_birth:
+            profile.date_of_birth = date_of_birth
+
+        # Handle profile picture upload
+        if "profile_picture" in request.FILES:
+            profile.profile_picture = request.FILES["profile_picture"]
+
         profile.save()
 
-        return Response({'message': 'Profile updated'})
+        # Return complete user data
+        return Response({
+            'username': user.username,
+            'email': user.email,
+            'first_name': user.first_name,
+            'last_name': user.last_name,
+            'phone_number': profile.phone_number,
+            'profile_picture_url': profile.profile_picture_url,
+            'bio': profile.bio,
+            'date_of_birth': profile.date_of_birth,
+            'gender': profile.gender,
+            'gender_display': profile.get_gender_display() if profile.gender else "",
+        })
+
 
 
 

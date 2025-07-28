@@ -14,10 +14,16 @@ class Conversation(models.Model):
     
 
 class Message(models.Model):
+    MESSAGE_TYPE_CHOICES = (
+        ('text', 'Text'),
+        ('audio', 'Audio'),
+    )
     conversation = models.ForeignKey(Conversation, on_delete=models.CASCADE, related_name="messages", default=True)
     sender = models.ForeignKey(User, on_delete=models.CASCADE, related_name='sent_messages')
     recipient = models.ForeignKey(UserProfile, on_delete=models.CASCADE, related_name='received_messages')
     content = models.TextField()
+    audio_data = models.BinaryField(null=True, blank=True)
+    message_type = models.CharField(max_length=10, choices=MESSAGE_TYPE_CHOICES, default='text')
     timestamp = models.DateTimeField(auto_now_add=True)
     is_delivered = models.BooleanField(default=False)
     is_read = models.BooleanField(default=False)

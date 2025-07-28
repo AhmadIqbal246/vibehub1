@@ -16,6 +16,18 @@ class PhoneNumberSerializer(serializers.ModelSerializer):
         model = UserProfile
         fields = ['phone_number']
 
+        
+class UserProfileSerializer(serializers.ModelSerializer):
+    profile_picture_url = serializers.SerializerMethodField()
+    gender_display = serializers.CharField(source='get_gender_display', read_only=True)
+
+    class Meta:
+        model = UserProfile
+        fields = ['phone_number', 'profile_picture', 'profile_picture_url', 'bio', 'date_of_birth', 'gender', 'gender_display']
+
+    def get_profile_picture_url(self, obj):
+        return obj.profile_picture.url if obj.profile_picture else None
+
 
 class ManualSignupSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True)
