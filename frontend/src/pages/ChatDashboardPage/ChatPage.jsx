@@ -4,7 +4,7 @@ import axiosInstance from "../../utils/axiosConfig";
 import ENV from "../../config";
 import { Navbar } from "../../components/mutualcomponents/Navbar/Navbar";
 import ConversationList from "../../components/mutualcomponents/Conversations/ConversationList";
-import { User, Send, Phone, Video, MoreVertical, MessageCircle, Check, CheckCheck, Mic, StopCircle, Edit, Trash, X, Smile } from "lucide-react";
+import { User, Send, Phone, Video, MoreVertical, MessageCircle, Check, CheckCheck, Mic, StopCircle, Edit, Trash, X, Smile, ArrowLeft } from "lucide-react";
 import InputField from "../../components/common/InputField";
 import Avatar from "../../components/common/Avatar";
 import EmojiPicker from 'emoji-picker-react';
@@ -34,6 +34,10 @@ function ChatPage() {
   const currentUsername = getCurrentUsername();
   // Add state for recipient phone chat
   const [recipientProfile, setRecipientProfile] = useState(null);
+  // Add state for mobile view management
+  const [showChatInterface, setShowChatInterface] = useState(false);
+  // Add state for message options on mobile
+  const [selectedMessageId, setSelectedMessageId] = useState(null);
 
   // Load messages when component mounts with conversationId
   useEffect(() => {
@@ -57,11 +61,21 @@ function ChatPage() {
 
       loadInitialConversation();
       connectWebSocket(conversationId);
+      
+      // Show chat interface on mobile when conversationId is present
+      setShowChatInterface(true);
     } else if (recipientPhone) {
       // No conversation yet, clear messages
       setMessages([]);
       setSelectedConversation(null);
       setError("");
+      
+      // Show chat interface on mobile when recipientPhone is present
+      setShowChatInterface(true);
+    } else {
+      // No conversation or recipient, show conversation list on mobile
+      setShowChatInterface(false);
+      setSelectedConversation(null);
     }
   }, [conversationId, recipientPhone]);
 
@@ -181,6 +195,9 @@ function ChatPage() {
     }
 
     connectWebSocket(conversation.id);
+    
+    // Show chat interface on mobile when conversation is selected
+    setShowChatInterface(true);
   };
 
   // Start recording audio
@@ -406,22 +423,43 @@ function ChatPage() {
     return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   };
 
+  // Handle back button click for mobile
+  const handleBackClick = () => {
+    setShowChatInterface(false);
+    // Don't navigate, just hide chat interface and show conversation list
+  };
+
+  // Handle message selection for mobile options
+  const handleMessageSelect = (messageId) => {
+    setSelectedMessageId(selectedMessageId === messageId ? null : messageId);
+  };
+
+  // Close message options
+  const closeMessageOptions = () => {
+    setSelectedMessageId(null);
+  };
+
   return (
     <div className="flex h-screen bg-gray-50">
-      <Navbar />
-      
-      {/* Main Content */}
-      <div className="flex flex-1 ml-16 md:ml-64">
-        {/* Conversation List Panel */}
+      {/* Conversation List Panel - Hidden on mobile when chat is active */}
+      <div className={`${showChatInterface && (selectedConversation || recipientPhone) ? 'hidden md:block' : 'block'} md:block`}>
         <ConversationList onConversationSelect={handleConversationSelect} selectedConversationId={selectedConversation?.id} />
+      </div>
 
-        {/* Chat Area */}
-        <div className="flex-1 flex flex-col bg-white">
+      {/* Chat Area - Hidden on mobile when conversation list is active or no conversation selected */}
+      <div className={`${showChatInterface && (selectedConversation || recipientPhone) ? 'block' : 'hidden md:block'} md:block flex-2 flex flex-col bg-white relative`}>
           {(selectedConversation || recipientPhone) ? (
             <>
               {/* Chat Header */}
               <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
                 <div className="flex items-center">
+                  {/* Back button for mobile */}
+                  <button 
+                    onClick={handleBackClick}
+                    className="md:hidden p-2 hover:bg-gray-100 rounded-full transition-colors mr-2"
+                  >
+                    <ArrowLeft className="w-5 h-5 text-gray-600" />
+                  </button>
                   <div className="relative">
                     {selectedConversation ? (
                       <Avatar
@@ -465,7 +503,10 @@ function ChatPage() {
               </div>
 
               {/* Messages */}
-              <div className="flex-1 overflow-y-auto p-6 space-y-4 bg-gray-50">
+              <div 
+                className="flex-1 overflow-y-auto p-6 space-y-4 bg-gray-50 md:pb-24 h-full"
+                onClick={closeMessageOptions}
+              >
                 {messages.length > 0 ? messages.map((msg) => {
                   const isCurrentUser = msg.sender_username === currentUsername;
                   return (
@@ -490,17 +531,39 @@ function ChatPage() {
                             : 'bg-white text-gray-800 rounded-bl-md shadow-sm'
                         } relative group`}
                       >
-                        {/* Edit/Delete buttons for current user's text messages */}
-                        {isCurrentUser && msg.message_type === 'text' && (
-                          <div className="absolute right-0 top-0 transform translate-x-1 -translate-y-1/2 flex space-x-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        {/* Mobile 3-dots menu for current user's messages */}
+                        {isCurrentUser && (msg.message_type === 'text' || msg.message_type === 'audio') && (
+                          <div className="absolute -top-2 -right-2 opacity-100 group-hover:opacity-100 transition-opacity md:hidden">
                             <button 
-                              onClick={() => handleEditMessage(msg)}
-                              className="p-1 bg-white text-blue-500 rounded-full shadow-md hover:bg-blue-50 transition-colors"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleMessageSelect(msg.id);
+                              }}
+                              className="p-2 bg-gray-800 hover:bg-gray-700 text-white rounded-full shadow-lg transition-colors"
                             >
-                              <Edit size={14} />
+                              <MoreVertical size={16} />
                             </button>
+                          </div>
+                        )}
+                        {/* Edit/Delete buttons for current user's messages - Desktop */}
+                        {isCurrentUser && (msg.message_type === 'text' || msg.message_type === 'audio') && (
+                          <div className="absolute right-0 top-0 transform translate-x-1 -translate-y-1/2 flex space-x-1 opacity-0 group-hover:opacity-100 transition-opacity hidden md:flex">
+                            {msg.message_type === 'text' && (
+                              <button 
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleEditMessage(msg);
+                                }}
+                                className="p-1 bg-white text-blue-500 rounded-full shadow-md hover:bg-blue-50 transition-colors"
+                              >
+                                <Edit size={14} />
+                              </button>
+                            )}
                             <button 
-                              onClick={() => handleDeleteMessage(msg.id)}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDeleteMessage(msg.id);
+                              }}
                               className="p-1 bg-white text-red-500 rounded-full shadow-md hover:bg-red-50 transition-colors"
                             >
                               <Trash size={14} />
@@ -599,6 +662,38 @@ function ChatPage() {
                             </div>
                           </div>
                         )}
+                        
+                        {/* Mobile options for current user's messages */}
+                        {isCurrentUser && (msg.message_type === 'text' || msg.message_type === 'audio') && selectedMessageId === msg.id && (
+                          <div className="absolute top-0 right-0 mt-2 mr-2 bg-white rounded-lg shadow-lg border border-gray-200 z-50 md:hidden">
+                            <div className="flex flex-col">
+                              {msg.message_type === 'text' && (
+                                <button 
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleEditMessage(msg);
+                                    closeMessageOptions();
+                                  }}
+                                  className="flex items-center px-4 py-3 text-blue-600 hover:bg-blue-50 transition-colors border-b border-gray-100"
+                                >
+                                  <Edit size={16} className="mr-3" />
+                                  <span>Edit</span>
+                                </button>
+                              )}
+                              <button 
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleDeleteMessage(msg.id);
+                                  closeMessageOptions();
+                                }}
+                                className="flex items-center px-4 py-3 text-red-600 hover:bg-red-50 transition-colors"
+                              >
+                                <Trash size={16} className="mr-3" />
+                                <span>Delete</span>
+                              </button>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     </div>
                   );
@@ -607,8 +702,8 @@ function ChatPage() {
                 <div ref={messagesEndRef} />
               </div>
 
-              {/* Input Area */}
-              <div className="p-4 border-t border-gray-200 bg-white relative">
+              {/* Input Area - Fixed to bottom of chat interface on desktop */}
+              <div className="p-4 border-t border-gray-200 bg-white relative md:sticky md:bottom-0 md:left-0 md:right-0 md:z-10">
                 {showEmojiPicker && (
                   <div className="absolute bottom-full mb-2 z-50 bg-white rounded shadow-lg p-2">
                     <EmojiPicker
@@ -687,14 +782,17 @@ function ChatPage() {
               </div>
             </>
           ) : (
-            <div className="flex items-center justify-center h-full text-gray-500">
-              <MessageCircle className="w-12 h-12" />
-              <p className="ml-2 text-lg">Select a conversation or start a new chat</p>
+            // On mobile, show conversation list instead of empty message when no conversation is selected
+            <div className="md:flex md:items-center md:justify-center md:h-full md:text-gray-500 hidden">
+              <div className="flex items-center justify-center h-full text-gray-500">
+                <MessageCircle className="w-12 h-12" />
+                <p className="ml-2 text-lg">Select a conversation or start a new chat</p>
+              </div>
             </div>
           )}
         </div>
       </div>
-    </div>
+
   );
 }
 
