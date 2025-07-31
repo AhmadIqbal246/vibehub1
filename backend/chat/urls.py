@@ -1,5 +1,5 @@
 from django.urls import path
-from .views import send_message, user_conversations, conversation_messages, send_message_in_conversation, create_conversation, edit_message, delete_message
+from .views import send_message, user_conversations, conversation_messages, send_message_in_conversation, create_conversation, edit_message, delete_message, delete_conversation
 
 urlpatterns = [
     path('send-message/', send_message, name='send_message'),
@@ -8,5 +8,6 @@ urlpatterns = [
     path('conversation/<int:conversation_id>/send-message/', send_message_in_conversation, name='send_message_in_conversation'),
     path('create-conversation/', create_conversation, name='create_conversation'),
     path('message/<int:message_id>/edit/', edit_message, name='edit_message'),
-    path('message/<int:message_id>/delete/', delete_message, name='delete_message')
+    path('message/<int:message_id>/delete/', delete_message, name='delete_message'),
+    path('conversation/<int:conversation_id>/delete/', delete_conversation, name='delete_conversation')
 ]

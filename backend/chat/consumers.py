@@ -94,6 +94,13 @@ class ChatConsumer(AsyncWebsocketConsumer):
                 audio_data=audio_data
             )
 
+            # Auto-restore conversation for participants who deleted it
+            for participant in await sync_to_async(lambda: list(conversation.participants.all()))():
+                if await sync_to_async(lambda: participant in conversation.deleted_by.all())():
+                    await sync_to_async(conversation.deleted_by.remove)(participant)
+                    # DO NOT clear deletion timestamp - keep it so user only sees messages after deletion
+                    # The deletion timestamp should persist even after restoration
+
             # Build absolute URL for profile pictures
             base_url = f"{settings.BASE_API_URL}"
             sender_picture_url = None

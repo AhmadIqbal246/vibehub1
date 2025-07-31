@@ -6,6 +6,9 @@ from users.models import UserProfile
     
 class Conversation(models.Model):
     participants = models.ManyToManyField(UserProfile, related_name='conversations')
+    deleted_by = models.ManyToManyField(UserProfile, related_name='deleted_conversations', blank=True)
+    # Track when each user deleted the conversation
+    deletion_timestamps = models.JSONField(default=dict, blank=True)  # {user_id: timestamp}
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from "react";
-import axios from "axios";
+import axiosInstance from "../../../utils/axiosConfig";
 import ENV from "../../../config";
 import { useNavigate } from "react-router-dom";
-import { User, MessageCircle, Clock, Check, CheckCheck, Search } from "lucide-react";
+import { User, MessageCircle, Clock, Check, CheckCheck, Search, Trash } from "lucide-react";
 import { Navbar } from "../Navbar/Navbar";
 import InputField from "../../common/InputField";
 import Avatar from "../../common/Avatar";
@@ -17,10 +17,8 @@ function ConversationList({ onConversationSelect, selectedConversationId }) {
 
   useEffect(() => {
     setLoading(true);
-    axios
-      .get(`${ENV.BASE_API_URL}/chat/api/conversations/`, {
-        withCredentials: true,
-      })
+    axiosInstance
+      .get(`${ENV.BASE_API_URL}/chat/api/conversations/`)
       .then((res) => {
         setConversations(res.data);
         setLoading(false);
@@ -73,6 +71,20 @@ function ConversationList({ onConversationSelect, selectedConversationId }) {
       onConversationSelect(conversation);
     }
     navigate(`/chat/${conversation.id}`);
+  };
+
+  const handleDeleteConversation = async (conversationId, e) => {
+    e.stopPropagation();
+    if (confirm("Are you sure you want to delete this conversation? This will only remove it from your view.")) {
+      try {
+        await axiosInstance.delete(`${ENV.BASE_API_URL}/chat/api/conversation/${conversationId}/delete/`);
+        // Remove the conversation from the local state
+        setConversations(prev => prev.filter(conv => conv.id !== conversationId));
+      } catch (error) {
+        console.error("Failed to delete conversation:", error);
+        setError("Failed to delete conversation");
+      }
+    }
   };
 
   return (
@@ -158,7 +170,7 @@ function ConversationList({ onConversationSelect, selectedConversationId }) {
                   <div
                     key={conv.id}
                     onClick={() => handleConversationClick(conv)}
-                    className={`block px-4 py-4 hover:bg-gray-50 transition-colors border-b border-gray-100 relative cursor-pointer ${
+                    className={`block px-4 py-4 hover:bg-gray-50 transition-colors border-b border-gray-100 relative cursor-pointer group ${
                       selectedConversationId === conv.id ? 'bg-blue-50 border-r-2 border-blue-500' : ''
                     }`}
                   >
@@ -189,11 +201,20 @@ function ConversationList({ onConversationSelect, selectedConversationId }) {
                               {otherParticipant.phone_number || 'No phone number'}
                             </p>
                           </div>
-                          {conv.last_message && (
-                            <span className="text-xs text-gray-500 ml-2 flex-shrink-0">
-                              {formatTime(conv.last_message.timestamp)}
-                            </span>
-                          )}
+                          <div className="flex items-center space-x-2">
+                            {conv.last_message && (
+                              <span className="text-xs text-gray-500 flex-shrink-0">
+                                {formatTime(conv.last_message.timestamp)}
+                              </span>
+                            )}
+                            {/* Delete button - visible on hover */}
+                            <button
+                              onClick={(e) => handleDeleteConversation(conv.id, e)}
+                              className="opacity-0 group-hover:opacity-100 transition-opacity p-1 text-red-500 hover:text-red-700 hover:bg-red-50 rounded"
+                            >
+                              <Trash size={16} />
+                            </button>
+                          </div>
                         </div>
 
                         <div className="flex items-center mt-1">

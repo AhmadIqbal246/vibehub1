@@ -3,6 +3,8 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from django.contrib.auth.models import User
+from django.views.decorators.csrf import csrf_exempt
+from django.utils.decorators import method_decorator
 from users.models import UserProfile
 from .models import Conversation, Message
 from .serializers import MessageSerializer, ConversationSerializer
@@ -51,7 +53,11 @@ def send_message(request):
 @permission_classes([IsAuthenticated])
 def user_conversations(request):
     user_profile = request.user.userprofile
-    conversations = Conversation.objects.filter(participants=user_profile).order_by('-updated_at')
+    conversations = Conversation.objects.filter(
+        participants=user_profile
+    ).exclude(
+        deleted_by=user_profile
+    ).order_by('-updated_at')
     serializer = ConversationSerializer(conversations, many=True, context={'request': request})
     return Response(serializer.data)
 
@@ -68,7 +74,20 @@ def conversation_messages(request, conversation_id):
             is_read=False
         ).update(is_read=True)
         
-        messages = Message.objects.filter(conversation=conversation).order_by('timestamp')
+        # Get messages based on user's deletion timestamp
+        messages = Message.objects.filter(conversation=conversation)
+        
+        # Check if user has a deletion timestamp
+        deletion_timestamps = conversation.deletion_timestamps or {}
+        user_deletion_time = deletion_timestamps.get(str(request.user.userprofile.id))
+        
+        if user_deletion_time:
+            # User deleted the conversation, only show messages after deletion
+            from django.utils import timezone
+            deletion_datetime = timezone.datetime.fromisoformat(user_deletion_time)
+            messages = messages.filter(timestamp__gt=deletion_datetime)
+        
+        messages = messages.order_by('timestamp')
         serializer = MessageSerializer(messages, many=True, context={'request': request})
         return Response(serializer.data)
     except Conversation.DoesNotExist:
@@ -117,6 +136,13 @@ def send_message_in_conversation(request, conversation_id):
         message_type=message_type,
         audio_data=audio_data
     )
+
+    # Auto-restore conversation for participants who deleted it
+    for participant in conversation.participants.all():
+        if participant in conversation.deleted_by.all():
+            conversation.deleted_by.remove(participant)
+            # DO NOT clear deletion timestamp - keep it so user only sees messages after deletion
+            # The deletion timestamp should persist even after restoration
 
     serializer = MessageSerializer(message, context={'request': request})
     return Response(serializer.data, status=status.HTTP_201_CREATED)
@@ -188,6 +214,31 @@ def delete_message(request, message_id):
     
     return Response({"success": True, "message": "Message deleted successfully", "conversation_id": conversation_id})
 
-
-
-
+@api_view(['DELETE'])
+@permission_classes([IsAuthenticated])
+@csrf_exempt
+def delete_conversation(request, conversation_id):
+    try:
+        # Debug: Print user info
+        print(f"User: {request.user.username}, User ID: {request.user.id}")
+        print(f"User Profile: {request.user.userprofile.id if hasattr(request.user, 'userprofile') else 'No profile'}")
+        print(f"Conversation ID: {conversation_id}")
+        
+        conversation = Conversation.objects.get(id=conversation_id, participants=request.user.userprofile)
+        conversation.deleted_by.add(request.user.userprofile)
+        
+        # Store deletion timestamp
+        import json
+        from django.utils import timezone
+        deletion_timestamps = conversation.deletion_timestamps or {}
+        deletion_timestamps[str(request.user.userprofile.id)] = timezone.now().isoformat()
+        conversation.deletion_timestamps = deletion_timestamps
+        conversation.save()
+        
+        return Response({"success": True, "message": "Conversation deleted successfully"})
+    except Conversation.DoesNotExist:
+        print(f"Conversation {conversation_id} not found or user {request.user.username} not a participant")
+        return Response({"error": "Conversation not found or access denied."}, status=status.HTTP_404_NOT_FOUND)
+    except Exception as e:
+        print(f"Error in delete_conversation: {str(e)}")
+        return Response({"error": f"Server error: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
