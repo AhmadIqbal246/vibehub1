@@ -6,6 +6,7 @@ import { User, MessageCircle, Clock, Check, CheckCheck, Search, Trash } from "lu
 import { Navbar } from "../Navbar/Navbar";
 import InputField from "../../common/InputField";
 import Avatar from "../../common/Avatar";
+import Popup from "../../common/Popup";
 
 function ConversationList({ onConversationSelect, selectedConversationId }) {
   const [conversations, setConversations] = useState([]);
@@ -14,6 +15,8 @@ function ConversationList({ onConversationSelect, selectedConversationId }) {
   const [searchTerm, setSearchTerm] = useState("");
   const currentUsername = localStorage.getItem("username");
   const navigate = useNavigate();
+  const [showDeletePopup, setShowDeletePopup] = useState(false);
+  const [conversationToDelete, setConversationToDelete] = useState(null);
 
   useEffect(() => {
     setLoading(true);
@@ -73,25 +76,56 @@ function ConversationList({ onConversationSelect, selectedConversationId }) {
     navigate(`/chat/${conversation.id}`);
   };
 
-  const handleDeleteConversation = async (conversationId, e) => {
+  // Show popup instead of confirm
+  const handleDeleteButtonClick = (conversationId, e) => {
     e.stopPropagation();
-    if (confirm("Are you sure you want to delete this conversation? This will only remove it from your view.")) {
-      try {
-        await axiosInstance.delete(`${ENV.BASE_API_URL}/chat/api/conversation/${conversationId}/delete/`);
-        // Remove the conversation from the local state
-        setConversations(prev => prev.filter(conv => conv.id !== conversationId));
-      } catch (error) {
-        console.error("Failed to delete conversation:", error);
-        setError("Failed to delete conversation");
-      }
+    setConversationToDelete(conversationId);
+    setShowDeletePopup(true);
+  };
+
+  // Only perform deletion if confirmed in popup
+  const handleDeleteConversation = async () => {
+    if (!conversationToDelete) return;
+    try {
+      await axiosInstance.delete(`${ENV.BASE_API_URL}/chat/api/conversation/${conversationToDelete}/delete/`);
+      setConversations(prev => prev.filter(conv => conv.id !== conversationToDelete));
+      setShowDeletePopup(false);
+      setConversationToDelete(null);
+    } catch (error) {
+      console.error("Failed to delete conversation:", error);
+      setError("Failed to delete conversation");
+      setShowDeletePopup(false);
+      setConversationToDelete(null);
     }
   };
 
   return (
     <>
+      {/* Delete Confirmation Popup */}
+      <Popup
+        open={showDeletePopup}
+        onClose={() => { setShowDeletePopup(false); setConversationToDelete(null); }}
+        title="Delete Conversation"
+        description="Are you sure you want to delete this conversation? This will only remove it from your view."
+        showClose={false}
+      >
+        <div className="flex justify-end space-x-2 mt-4">
+          <button
+            className="px-4 py-2 rounded-lg bg-gray-100 text-gray-700 hover:bg-gray-200 font-semibold shadow-sm transition cursor-pointer"
+            onClick={() => { setShowDeletePopup(false); setConversationToDelete(null); }}
+          >
+            Cancel
+          </button>
+          <button
+            className="px-4 py-2 rounded-lg bg-red-600 text-white hover:bg-red-700 font-bold shadow-lg transition cursor-pointer"
+            onClick={handleDeleteConversation}
+          >
+            Delete
+          </button>
+        </div>
+      </Popup>
       {/* Navbar - Fixed on the left */}
       <Navbar />
-      
       {/* Conversation List - Next to navbar */}
       <div className="ml-16 md:ml-64 flex-1 flex">
         <div className="w-full max-w-md border-r border-gray-200 bg-white">
@@ -209,7 +243,7 @@ function ConversationList({ onConversationSelect, selectedConversationId }) {
                             )}
                             {/* Delete button - visible on hover */}
                             <button
-                              onClick={(e) => handleDeleteConversation(conv.id, e)}
+                              onClick={(e) => handleDeleteButtonClick(conv.id, e)}
                               className="opacity-0 group-hover:opacity-100 transition-opacity p-1 text-red-500 hover:text-red-700 hover:bg-red-50 rounded"
                             >
                               <Trash size={16} />

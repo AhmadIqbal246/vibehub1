@@ -23,6 +23,14 @@ class UserProfile(models.Model):
     def __str__(self):
         return f"{self.user.username}'s Profile"
 
+
+
+
+
+
+
+
+
     @property
     def profile_picture_url(self):
         if self.profile_picture:

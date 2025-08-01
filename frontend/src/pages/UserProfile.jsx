@@ -7,6 +7,7 @@ import InputField from "../components/common/InputField";
 import Avatar from "../components/common/Avatar";
 import { Navbar } from "../components/mutualcomponents/Navbar/Navbar";
 import ENV from "../config";
+import Popup from "../components/common/Popup";
 
 const UserProfile = () => {
   const navigate = useNavigate();
@@ -29,6 +30,7 @@ const UserProfile = () => {
   const [error, setError] = useState("");
   const [isEditing, setIsEditing] = useState(false);
   const [dragOver, setDragOver] = useState(false);
+  const [showLogoutPopup, setShowLogoutPopup] = useState(false);
 
   useEffect(() => {
     if (isInitialized && !isAuthenticated) {
@@ -140,7 +142,7 @@ const UserProfile = () => {
               <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
                 <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">Profile Settings</h1>
                 <button
-                  onClick={handleLogout}
+                  onClick={() => setShowLogoutPopup(true)}
                   className="flex items-center text-gray-600 hover:text-red-600 transition-colors"
                 >
                   <LogOut className="w-5 h-5 mr-2" />
@@ -367,6 +369,28 @@ const UserProfile = () => {
           </div>
         </div>
       </div>
+      <Popup
+        open={showLogoutPopup}
+        onClose={() => setShowLogoutPopup(false)}
+        title="Logout Confirmation"
+        description="Are you sure you want to logout?"
+        showClose={false}
+      >
+        <div className="flex justify-end space-x-2 mt-4">
+          <button
+            className="px-4 py-2 rounded-lg bg-gray-100 text-gray-700 hover:bg-gray-200 font-semibold shadow-sm transition"
+            onClick={() => setShowLogoutPopup(false)}
+          >
+            Cancel
+          </button>
+          <button
+            className="px-4 py-2 rounded-lg bg-red-600 text-white hover:bg-red-700 font-bold shadow-lg transition"
+            onClick={handleLogout}
+          >
+            Logout
+          </button>
+        </div>
+      </Popup>
     </div>
   );
 };
