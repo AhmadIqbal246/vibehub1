@@ -4,7 +4,7 @@ import { useDispatch, useSelector } from 'react-redux';
 import { loginUser, handleGoogleLoginSuccess } from '../../store/auth/authActions';
 import axios from "axios";
 import ENV from "../../config";
-import Cookies from "js-cookie";
+// Cookies import removed - CSRF disabled
 import GoogleButton from "react-google-button";
 import { FaEnvelope, FaLock, FaSignInAlt, FaGoogle, FaUserPlus, FaSpinner } from 'react-icons/fa';
 import InputField from "../../components/common/InputField";
@@ -17,9 +17,10 @@ const LoginPage = () => {
   const { loading, error, isAuthenticated, isInitialized } = useSelector((state) => state.auth);
 
   useEffect(() => {
-    // Check for Google login success
+    // Check for Google login success or error
     const searchParams = new URLSearchParams(location.search);
     const googleSuccess = searchParams.get('google_success');
+    const googleError = searchParams.get('error');
     
     if (googleSuccess === 'true') {
       dispatch(handleGoogleLoginSuccess())
@@ -29,6 +30,10 @@ const LoginPage = () => {
             navigate(from, { replace: true });
           }
         });
+    } else if (googleError === 'google_login_failed') {
+      dispatch({ type: 'auth/setError', payload: 'Google login failed. Please try again.' });
+      // Clear the error parameter from URL
+      navigate('/login', { replace: true });
     }
   }, [location, dispatch, navigate]);
 

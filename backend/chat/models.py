@@ -24,7 +24,7 @@ class Message(models.Model):
     conversation = models.ForeignKey(Conversation, on_delete=models.CASCADE, related_name="messages", default=True)
     sender = models.ForeignKey(User, on_delete=models.CASCADE, related_name='sent_messages')
     recipient = models.ForeignKey(UserProfile, on_delete=models.CASCADE, related_name='received_messages')
-    content = models.TextField()
+    content = models.TextField(null=True, blank=True)
     audio_data = models.BinaryField(null=True, blank=True)
     message_type = models.CharField(max_length=10, choices=MESSAGE_TYPE_CHOICES, default='text')
     timestamp = models.DateTimeField(auto_now_add=True)

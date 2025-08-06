@@ -4,10 +4,11 @@ import axiosInstance from "../../utils/axiosConfig";
 import ENV from "../../config";
 import { Navbar } from "../../components/mutualcomponents/Navbar/Navbar";
 import ConversationList from "../../components/mutualcomponents/Conversations/ConversationList";
-import { User, Send, Phone, Video, MoreVertical, MessageCircle, Check, CheckCheck, Mic, StopCircle, Edit, Trash, X, Smile, ArrowLeft } from "lucide-react";
+import { User, Send, Phone, Video, MoreVertical, MessageCircle, Check, CheckCheck, Mic, StopCircle, Edit, Trash, X, Smile, ArrowLeft, ChevronUp } from "lucide-react";
 import InputField from "../../components/common/InputField";
 import Avatar from "../../components/common/Avatar";
 import EmojiPicker from 'emoji-picker-react';
+import usePagination from '../../hooks/usePagination';
 
 function getCurrentUsername() {
   return localStorage.getItem("username");
@@ -28,6 +29,7 @@ function ChatPage() {
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const ws = useRef(null);
   const messagesEndRef = useRef(null);
+  const messagesRef = useRef(null);
   const reconnectTimeoutRef = useRef(null);
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
@@ -38,19 +40,48 @@ function ChatPage() {
   const [showChatInterface, setShowChatInterface] = useState(false);
   // Add state for message options on mobile
   const [selectedMessageId, setSelectedMessageId] = useState(null);
+  // Add state for typing indicator
+  const [typingUsers, setTypingUsers] = useState(new Set());
+  const [isTyping, setIsTyping] = useState(false);
+  const typingTimeoutRef = useRef(null);
+  // Add state for tracking visible messages for read receipts
+  const visibleMessagesRef = useRef(new Set());
+  
+  // Pagination state for messages
+  const {
+    currentPage: messagePage,
+    hasNext: hasMoreMessages,
+    updatePaginationData: updateMessagePagination,
+    nextPage: loadMoreMessages,
+    loading: messagesLoading,
+    setLoading: setMessagesLoading,
+    reset: resetMessagePagination
+  } = usePagination(15); // 15 messages per page
+  
+  // State to track if we should show "see older messages" button
+  const [showLoadOlderButton, setShowLoadOlderButton] = useState(false);
+  const messagesContainerRef = useRef(null);
 
   // Load messages when component mounts with conversationId
   useEffect(() => {
     if (conversationId) {
       const loadInitialConversation = async () => {
         try {
-          const res = await fetch(
-            `${ENV.BASE_API_URL}/chat/api/conversation/${conversationId}/messages/`,
-            { credentials: "include" }
+          resetMessagePagination();
+          const res = await axiosInstance.get(
+            `${ENV.BASE_API_URL}/chat/api/conversation/${conversationId}/messages/?page=1&page_size=15`
           );
-          if (res.ok) {
-            const data = await res.json();
-            setMessages(data);
+          if (res.status === 200) {
+            console.log('Messages API Response:', res.data);
+            setMessages(res.data.messages || res.data);
+            if (res.data.pagination) {
+              console.log('Messages Pagination Data:', res.data.pagination);
+              updateMessagePagination(res.data.pagination);
+            }
+            // Auto-scroll to bottom on initial load to show latest messages
+            setTimeout(() => {
+              messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+            }, 100);
           } else {
             setError("Failed to fetch messages");
           }
@@ -128,6 +159,60 @@ function ChatPage() {
                 return prev.filter(msg => msg.id != data.id);
               });
               return;
+            } else if (data.action_type === 'typing_indicator') {
+              // Handle typing indicator
+              const { username, is_typing } = data;
+              if (username !== currentUsername) {
+                setTypingUsers((prev) => {
+                  const newSet = new Set(prev);
+                  if (is_typing) {
+                    newSet.add(username);
+                  } else {
+                    newSet.delete(username);
+                  }
+                  return newSet;
+                });
+              }
+              return;
+            } else if (data.action_type === 'read_receipt') {
+              // Handle read receipt
+              const { message_id, reader_username } = data;
+              if (reader_username !== currentUsername) {
+                setMessages((prev) => {
+                  return prev.map(msg => {
+                    if (msg.id == message_id) {
+                      return { ...msg, is_read: true };
+                    }
+                    return msg;
+                  });
+                });
+              }
+              return;
+            } else if (data.action_type === 'new_message') {
+              // Handle new message
+              const newMessage = {
+                content: data.content,
+                sender_username: data.sender_username,
+                timestamp: data.timestamp,
+                is_read: data.is_read,
+                id: data.id,
+                sender_profile_picture: data.sender_profile_picture,
+                message_type: data.message_type || 'text',
+                audio_data_base64: data.audio_data_base64
+              };
+
+              setMessages((prev) => {
+                const ids = new Set(prev.map((msg) => msg.id));
+                if (ids.has(newMessage.id)) return prev;
+                return [...prev, newMessage];
+              });
+
+              // Also update the conversation list in real-time
+              if (typeof window.updateConversationList === 'function') {
+                window.updateConversationList(data.conversation_id, newMessage);
+              }
+
+              return; // Return after handling new message
             }
 
             // Handle new message
@@ -180,13 +265,17 @@ function ChatPage() {
     navigate(`/chat/${conversation.id}`);
 
     try {
-      const res = await fetch(
-        `${ENV.BASE_API_URL}/chat/api/conversation/${conversation.id}/messages/`,
-        { credentials: "include" }
+      resetMessagePagination();
+      const res = await axiosInstance.get(
+        `${ENV.BASE_API_URL}/chat/api/conversation/${conversation.id}/messages/?page=1&page_size=15`
       );
-      if (res.ok) {
-        const data = await res.json();
-        setMessages(data);
+      if (res.status === 200) {
+        console.log('Conversation Messages API Response:', res.data);
+        setMessages(res.data.messages || res.data);
+        if (res.data.pagination) {
+          console.log('Conversation Messages Pagination Data:', res.data.pagination);
+          updateMessagePagination(res.data.pagination);
+        }
       } else {
         setError("Failed to fetch messages");
       }
@@ -308,15 +397,29 @@ function ChatPage() {
           `${ENV.BASE_API_URL}/chat/api/send-message/`,
           messageData
         );
-        // After first message, redirect to the new conversation page
+        
+        // Clear form after successful send
+        setContent("");
+        setAudioBlob(null);
+        
+        // Instead of navigating, update the current state
         if (res.data && res.data.conversation_id) {
-          navigate(`/chat/${res.data.conversation_id}`);
-        } else if (res.data && res.data.conversation) {
-          // fallback if conversation object is returned
-          navigate(`/chat/${res.data.conversation.id}`);
-        } else {
-          // fallback: reload conversations
-          navigate(`/conversations`);
+          // Set the conversation and connect WebSocket
+          const conversationData = res.data.conversation;
+          setSelectedConversation(conversationData);
+          
+          // Add the message to local state
+          const newMessage = {
+            ...res.data.message,
+            sender_username: currentUsername,
+          };
+          setMessages([newMessage]);
+          
+          // Connect to WebSocket for real-time messaging
+          connectWebSocket(res.data.conversation_id);
+          
+          // Update URL without navigating (to maintain state)
+          window.history.replaceState(null, '', `/chat/${res.data.conversation_id}`);
         }
       } catch (err) {
         setError(err?.response?.data?.error || "Failed to send message");
@@ -343,6 +446,33 @@ function ChatPage() {
     setContent("");
   };
   
+  // Handle typing status
+  const handleTyping = () => {
+    if (!isTyping) {
+      setIsTyping(true);
+      if (ws.current && ws.current.readyState === WebSocket.OPEN) {
+        const typingData = {
+          action_type: 'typing',
+          sender_username: currentUsername
+        };
+        ws.current.send(JSON.stringify(typingData));
+      }
+    }
+    if (typingTimeoutRef.current) {
+      clearTimeout(typingTimeoutRef.current);
+    }
+    typingTimeoutRef.current = setTimeout(() => {
+      setIsTyping(false);
+      if (ws.current && ws.current.readyState === WebSocket.OPEN) {
+        const stopTypingData = {
+          action_type: 'stop_typing',
+          sender_username: currentUsername
+        };
+        ws.current.send(JSON.stringify(stopTypingData));
+      }
+    }, 3000);
+  };
+
   // Update message via WebSocket
   const handleUpdateMessage = () => {
     if (!editingMessageId || !content.trim() || !selectedConversation) return;
@@ -383,9 +513,31 @@ function ChatPage() {
     }
   };
 
-  // Scroll to bottom of messages
+  // Scroll to bottom only for new real-time messages or initial load
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    if (messages.length === 0) return;
+    
+    const prevMessages = messagesRef.current || [];
+    const currentMessages = messages;
+    
+    // Check if this is initial load (first time messages are set)
+    if (prevMessages.length === 0 && currentMessages.length > 0) {
+      // Initial load - scroll to bottom
+      setTimeout(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+      }, 100);
+    } else if (currentMessages.length > prevMessages.length) {
+      // Check if new messages were added at the end (real-time messages)
+      const lastOldMessage = prevMessages[prevMessages.length - 1];
+      const lastNewMessage = currentMessages[currentMessages.length - 1];
+      
+      if (!lastOldMessage || lastOldMessage.id !== lastNewMessage.id) {
+        // New message at the end - scroll to bottom
+        messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+      }
+    }
+    
+    messagesRef.current = messages;
   }, [messages]);
 
   // Cleanup WebSocket on unmount
@@ -438,9 +590,35 @@ function ChatPage() {
   const closeMessageOptions = () => {
     setSelectedMessageId(null);
   };
+  
+  // Fetch older messages if available
+  const handleLoadOlderMessages = async () => {
+    if (!selectedConversation) return;
+
+    setMessagesLoading(true);
+    
+    try {
+      const res = await axiosInstance.get(
+        `${ENV.BASE_API_URL}/chat/api/conversation/${selectedConversation.id}/messages/?page=${messagePage + 1}&page_size=15`
+      );
+
+      if (res.status === 200) {
+        console.log('Load More Messages API Response:', res.data);
+        setMessages((prevMessages) => [...res.data.messages, ...prevMessages]);
+        if (res.data.pagination) {
+          console.log('Load More Messages Pagination Data:', res.data.pagination);
+          updateMessagePagination(res.data.pagination);
+        }
+      }
+    } catch (error) {
+      setError('Error loading older messages.');
+    } finally {
+      setMessagesLoading(false);
+    }
+  };
 
   return (
-    <div className="flex h-screen bg-gray-50">
+    <div className="flex h-screen bg-gray-50 overflow-hidden">
       {/* Conversation List Panel - Hidden on mobile when chat is active */}
       <div className={`${showChatInterface && (selectedConversation || recipientPhone) ? 'hidden md:block' : 'block'} md:block`}>
         <ConversationList onConversationSelect={handleConversationSelect} selectedConversationId={selectedConversation?.id} />
@@ -481,9 +659,15 @@ function ChatPage() {
                         : `Chat with ${recipientPhone}`}
                     </h2>
                     <p className="text-sm text-gray-500">
-                      {selectedConversation
-                        ? getOtherParticipant(selectedConversation).phone_number
-                        : `Phone: ${recipientPhone}`}
+                      {typingUsers.size > 0 ? (
+                        <span className="text-green-500 font-medium">
+                          {Array.from(typingUsers)[0]} is typing...
+                        </span>
+                      ) : (
+                        selectedConversation
+                          ? getOtherParticipant(selectedConversation).phone_number
+                          : `Phone: ${recipientPhone}`
+                      )}
                     </p>
                   </div>
                 </div>
@@ -504,9 +688,26 @@ function ChatPage() {
 
               {/* Messages */}
               <div 
-                className="flex-1 overflow-y-auto p-6 space-y-4 bg-gray-50 md:pb-24 h-full"
+                className="h-[calc(100vh-180px)] overflow-y-auto p-6 space-y-4 bg-gray-50"
                 onClick={closeMessageOptions}
               >
+                {/* Load Older Messages Button */}
+                {hasMoreMessages && (
+                  <div className="flex justify-center py-4">
+                    <button
+                      onClick={handleLoadOlderMessages}
+                      disabled={messagesLoading}
+                      className="flex items-center gap-2 px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg transition-colors disabled:opacity-50"
+                    >
+                      {messagesLoading ? (
+                        <div className="animate-spin rounded-full h-4 w-4 border-2 border-gray-500 border-t-transparent"></div>
+                      ) : (
+                        <ChevronUp size={16} />
+                      )}
+                      {messagesLoading ? 'Loading...' : 'See Older Messages'}
+                    </button>
+                  </div>
+                )}
                 {messages.length > 0 ? messages.map((msg) => {
                   const isCurrentUser = msg.sender_username === currentUsername;
                   return (
@@ -657,8 +858,17 @@ function ChatPage() {
                         ) : (
                           <div className="text-gray-800">
                             {msg.content}
-                            <div className="text-xs text-gray-500 mt-1">
-                              {formatTime(msg.timestamp)}
+                            <div className="flex items-center justify-between text-xs text-gray-500 mt-1">
+                              <span>{formatTime(msg.timestamp)}</span>
+                              {isCurrentUser && (
+                                <div className="ml-2 flex-shrink-0">
+                                  {msg.is_read ? (
+                                    <CheckCheck size={16} className="text-yellow-400" />
+                                  ) : (
+                                    <Check size={16} className="text-gray-400" />
+                                  )}
+                                </div>
+                              )}
                             </div>
                           </div>
                         )}
@@ -702,8 +912,8 @@ function ChatPage() {
                 <div ref={messagesEndRef} />
               </div>
 
-              {/* Input Area - Fixed to bottom of chat interface on desktop */}
-              <div className="p-4 border-t border-gray-200 bg-white relative md:sticky md:bottom-0 md:left-0 md:right-0 md:z-10">
+              {/* Input Area */}
+              <div className="p-4 border-t border-gray-200 bg-white">
                 {showEmojiPicker && (
                   <div className="absolute bottom-full mb-2 z-50 bg-white rounded shadow-lg p-2">
                     <EmojiPicker
@@ -741,7 +951,10 @@ function ChatPage() {
                       name="message"
                       placeholder={editingMessageId ? "Edit your message..." : "Type a message..."}
                       value={content}
-                      onChange={(e) => setContent(e.target.value)}
+                      onChange={(e) => {
+                        setContent(e.target.value);
+                        handleTyping();
+                      }}
                       className="flex-1"
                       disabled={isRecording}
                     />
@@ -783,7 +996,7 @@ function ChatPage() {
             </>
           ) : (
             // On mobile, show conversation list instead of empty message when no conversation is selected
-            <div className="md:flex md:items-center md:justify-center md:h-full md:text-gray-500 hidden">
+            <div className="hidden md:flex md:items-center md:justify-center h-full text-gray-500">
               <div className="flex items-center justify-center h-full text-gray-500">
                 <MessageCircle className="w-12 h-12" />
                 <p className="ml-2 text-lg">Select a conversation or start a new chat</p>
@@ -791,8 +1004,7 @@ function ChatPage() {
             </div>
           )}
         </div>
-      </div>
-
+    </div>
   );
 }
 

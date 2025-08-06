@@ -137,10 +137,21 @@ const UserProfile = () => {
       {/* Main Content - Profile Section */}
       <div className="flex-1 pl-16 md:pl-64 min-h-screen">
         <div className="p-4 sm:p-6 lg:p-8 max-w-[1200px] mx-auto">
-          <div className="bg-white rounded-2xl shadow-xl overflow-hidden">
+          <div className="bg-white rounded-2xl shadow-2xl overflow-hidden relative">
+            {/* Cover Photo */}
+            <div className="h-40 bg-gradient-to-r from-purple-400 via-pink-500 to-red-500 relative">
+              <div className="absolute bottom-0 left-4 transform translate-y-1/2">
+                <Avatar
+                  src={previewUrl}
+                  alt={user?.username}
+                  initials={getUserInitials(user)}
+                  size="2xl"
+                />
+              </div>
+            </div>
             <div className="p-6 sm:p-8">
               <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
-                <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">Profile Settings</h1>
+                <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 mt-16">Profile Settings</h1>
                 <button
                   onClick={() => setShowLogoutPopup(true)}
                   className="flex items-center text-gray-600 hover:text-red-600 transition-colors"
@@ -149,6 +160,12 @@ const UserProfile = () => {
                   <span className="inline">Logout</span>
                 </button>
               </div>
+
+              {updating && (
+                <div className="mb-4 p-4 bg-blue-50 border-l-4 border-blue-500 text-blue-700">
+                  <p>Updating profile...</p>
+                </div>
+              )}
 
               {error && (
                 <div className="mb-4 p-4 bg-red-50 border-l-4 border-red-500 text-red-700">

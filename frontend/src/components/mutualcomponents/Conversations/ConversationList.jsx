@@ -1,12 +1,13 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import axiosInstance from "../../../utils/axiosConfig";
 import ENV from "../../../config";
 import { useNavigate } from "react-router-dom";
-import { User, MessageCircle, Clock, Check, CheckCheck, Search, Trash } from "lucide-react";
+import { User, MessageCircle, Clock, Check, CheckCheck, Search, Trash, ChevronDown } from "lucide-react";
 import { Navbar } from "../Navbar/Navbar";
 import InputField from "../../common/InputField";
 import Avatar from "../../common/Avatar";
 import Popup from "../../common/Popup";
+import usePagination from '../../../hooks/usePagination';
 
 function ConversationList({ onConversationSelect, selectedConversationId }) {
   const [conversations, setConversations] = useState([]);
@@ -17,20 +18,141 @@ function ConversationList({ onConversationSelect, selectedConversationId }) {
   const navigate = useNavigate();
   const [showDeletePopup, setShowDeletePopup] = useState(false);
   const [conversationToDelete, setConversationToDelete] = useState(null);
+  const ws = useRef(null);
+  const reconnectTimeoutRef = useRef(null);
 
+  // Pagination hook for conversations
+  const {
+    currentPage,
+    hasNext,
+    hasPrevious,
+    totalItems,
+    updatePaginationData,
+    nextPage,
+    previousPage,
+    loading: paginationLoading,
+    setLoading: setPaginationLoading
+  } = usePagination(6); // 6 conversations per page
+
+  // WebSocket connection for real-time conversation updates
   useEffect(() => {
-    setLoading(true);
-    axiosInstance
-      .get(`${ENV.BASE_API_URL}/chat/api/conversations/`)
-      .then((res) => {
-        setConversations(res.data);
-        setLoading(false);
-      })
-      .catch((err) => {
-        setError("Failed to fetch conversations");
-        setLoading(false);
-      });
+    const connectConversationWebSocket = () => {
+      try {
+        const wsScheme = window.location.protocol === "https:" ? "wss" : "ws";
+        const wsUrl = `${wsScheme}://localhost:8000/ws/conversations/`;
+        
+        ws.current = new WebSocket(wsUrl);
+        
+        ws.current.onopen = () => {
+          console.log('Conversation WebSocket connected');
+          // Send a ping to keep connection alive
+          ws.current.send(JSON.stringify({ type: 'ping' }));
+        };
+        
+        ws.current.onmessage = (e) => {
+          try {
+            const data = JSON.parse(e.data);
+            
+            if (data.type === 'conversation_update') {
+              const updatedConversation = data.conversation;
+              
+              setConversations((prevConversations) => {
+                const existingIndex = prevConversations.findIndex(
+                  conv => conv.id === updatedConversation.id
+                );
+                
+                if (existingIndex >= 0) {
+                  // Update existing conversation
+                  const updated = [...prevConversations];
+                  updated[existingIndex] = updatedConversation;
+                  // Move to top for new messages
+                  const [conversation] = updated.splice(existingIndex, 1);
+                  return [conversation, ...updated];
+                } else {
+                  // Add new conversation to the top
+                  return [updatedConversation, ...prevConversations];
+                }
+              });
+            } else if (data.type === 'conversation_delete') {
+              setConversations((prevConversations) =>
+                prevConversations.filter(conv => conv.id !== data.conversation_id)
+              );
+            }
+          } catch (err) {
+            console.error('Error parsing WebSocket message:', err);
+          }
+        };
+        
+        ws.current.onerror = (error) => {
+          console.error('Conversation WebSocket error:', error);
+        };
+        
+        ws.current.onclose = (event) => {
+          console.log('Conversation WebSocket closed:', event.code);
+          // Attempt to reconnect after 5 seconds
+          if (event.code !== 1000) {
+            reconnectTimeoutRef.current = setTimeout(() => {
+              connectConversationWebSocket();
+            }, 5000);
+          }
+        };
+      } catch (error) {
+        console.error('Failed to create conversation WebSocket:', error);
+      }
+    };
+    
+    // Connect to WebSocket
+    connectConversationWebSocket();
+    
+    // Cleanup on unmount
+    return () => {
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current);
+      }
+      if (ws.current) {
+        ws.current.close(1000, 'Component unmounting');
+      }
+    };
   }, []);
+  
+  // Load initial conversations
+  useEffect(() => {
+    fetchConversations();
+  }, [currentPage]);
+
+  const fetchConversations = async () => {
+    try {
+      // Only show loading skeleton for initial load (page 1)
+      if (currentPage === 1) {
+        setLoading(true);
+      }
+      setPaginationLoading(true);
+      
+      const response = await axiosInstance.get(
+        `${ENV.BASE_API_URL}/chat/api/conversations/?page=${currentPage}&page_size=8`
+      );
+      
+      console.log('Conversations API Response:', response.data);
+      
+      if (currentPage === 1) {
+        setConversations(response.data.conversations);
+      } else {
+        setConversations((prev) => [...prev, ...response.data.conversations]);
+      }
+      
+      if (response.data.pagination) {
+        console.log('Conversations Pagination Data:', response.data.pagination);
+        updatePaginationData(response.data.pagination);
+      }
+    } catch (err) {
+      setError("Failed to fetch conversations");
+    } finally {
+      if (currentPage === 1) {
+        setLoading(false);
+      }
+      setPaginationLoading(false);
+    }
+  };
 
   const getOtherParticipant = (participants) => {
     return participants.find(p => p.username !== currentUsername) || participants[0];
@@ -87,13 +209,31 @@ function ConversationList({ onConversationSelect, selectedConversationId }) {
   const handleDeleteConversation = async () => {
     if (!conversationToDelete) return;
     try {
-      await axiosInstance.delete(`${ENV.BASE_API_URL}/chat/api/conversation/${conversationToDelete}/delete/`);
+      console.log(`Attempting to delete conversation ${conversationToDelete}`);
+      console.log('Current user:', currentUsername);
+      
+      const response = await axiosInstance.delete(`${ENV.BASE_API_URL}/chat/api/conversation/${conversationToDelete}/delete/`);
+      console.log('Delete response:', response.data);
+      
       setConversations(prev => prev.filter(conv => conv.id !== conversationToDelete));
       setShowDeletePopup(false);
       setConversationToDelete(null);
+      setError(""); // Clear any previous errors
     } catch (error) {
       console.error("Failed to delete conversation:", error);
-      setError("Failed to delete conversation");
+      console.error("Error response:", error.response?.data);
+      console.error("Error status:", error.response?.status);
+      
+      let errorMessage = "Failed to delete conversation";
+      if (error.response?.status === 403) {
+        errorMessage = "Access denied. You don't have permission to delete this conversation.";
+      } else if (error.response?.status === 404) {
+        errorMessage = "Conversation not found.";
+      } else if (error.response?.data?.error) {
+        errorMessage = error.response.data.error;
+      }
+      
+      setError(errorMessage);
       setShowDeletePopup(false);
       setConversationToDelete(null);
     }
@@ -270,6 +410,24 @@ function ConversationList({ onConversationSelect, selectedConversationId }) {
                   </div>
                 );
               })
+            )}
+            
+            {/* Load More Button */}
+            {hasNext && (
+              <div className="p-4 border-t border-gray-200">
+                <button
+                  onClick={nextPage}
+                  disabled={paginationLoading}
+                  className="w-full py-2 px-4 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
+                >
+                  {paginationLoading ? (
+                    <div className="animate-spin rounded-full h-4 w-4 border-2 border-gray-500 border-t-transparent"></div>
+                  ) : (
+                    <ChevronDown size={16} />
+                  )}
+                  {paginationLoading ? 'Loading...' : 'Load More Conversations'}
+                </button>
+              </div>
             )}
           </div>
         </div>
