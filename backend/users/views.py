@@ -22,16 +22,21 @@ from rest_framework.permissions import AllowAny
 
 class GoogleLoginApi(APIView):
     def get(self, request, *args, **kwargs):
-        auth_serializer = AuthSerializer(data=request.GET)
-        auth_serializer.is_valid(raise_exception=True)
+        try:
+            auth_serializer = AuthSerializer(data=request.GET)
+            auth_serializer.is_valid(raise_exception=True)
 
-        validated_data = auth_serializer.validated_data
-        data = get_user_data(validated_data)
+            validated_data = auth_serializer.validated_data
+            data = get_user_data(validated_data)
 
-        user = data['user']
-        login(request, user)
+            user = data['user']
+            login(request, user)
 
-        return redirect("http://localhost:5173/profile?logged_in=google")
+            return redirect(f"{settings.BASE_APP_URL}/login?google_success=true")
+        except Exception as e:
+            # Log the error and redirect to login with error message
+            print(f"Google login error: {str(e)}")
+            return redirect(f"{settings.BASE_APP_URL}/login?error=google_login_failed")
 
 
 

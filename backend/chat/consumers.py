@@ -4,7 +4,7 @@ from channels.generic.websocket import AsyncWebsocketConsumer
 from django.contrib.auth.models import User
 from users.models import UserProfile
 from .models import Conversation, Message
-from .serializers import MessageSerializer
+from .serializers import MessageSerializer, ConversationSerializer
 from asgiref.sync import sync_to_async
 from django.urls import reverse
 from django.conf import settings
@@ -50,6 +50,28 @@ class ChatConsumer(AsyncWebsocketConsumer):
                 return
             elif action_type == 'delete':
                 await self.delete_message(data)
+                return
+            elif action_type == 'typing':
+                await self.handle_typing(data)
+                return
+            elif action_type == 'stop_typing':
+                await self.handle_stop_typing(data)
+                return
+            elif action_type == 'mark_read':
+                await self.handle_mark_read(data)
+                return
+            
+            # Validate required fields for message creation
+            if not sender_username:
+                await self.send(text_data=json.dumps({'error': 'sender_username is required'}))
+                return
+                
+            if not content and message_type == 'text':
+                await self.send(text_data=json.dumps({'error': 'content is required for text messages'}))
+                return
+                
+            if message_type == 'audio' and not audio_data_base64:
+                await self.send(text_data=json.dumps({'error': 'audio_data_base64 is required for audio messages'}))
                 return
 
             # Find sender User
@@ -259,3 +281,157 @@ class ChatConsumer(AsyncWebsocketConsumer):
             await self.send(text_data=json.dumps({'error': 'Message not found'}))
         except Exception as e:
             await self.send(text_data=json.dumps({'error': str(e)}))
+    
+    async def handle_typing(self, data):
+        """Handle typing indicator"""
+        try:
+            sender_username = data.get('sender_username')
+            if not sender_username:
+                return
+            
+            # Broadcast typing indicator to the group
+            await self.channel_layer.group_send(
+                self.room_group_name,
+                {
+                    'type': 'typing_indicator',
+                    'username': sender_username,
+                    'is_typing': True
+                }
+            )
+        except Exception as e:
+            await self.send(text_data=json.dumps({'error': str(e)}))
+    
+    async def handle_stop_typing(self, data):
+        """Handle stop typing indicator"""
+        try:
+            sender_username = data.get('sender_username')
+            if not sender_username:
+                return
+            
+            # Broadcast stop typing indicator to the group
+            await self.channel_layer.group_send(
+                self.room_group_name,
+                {
+                    'type': 'typing_indicator',
+                    'username': sender_username,
+                    'is_typing': False
+                }
+            )
+        except Exception as e:
+            await self.send(text_data=json.dumps({'error': str(e)}))
+    
+    async def handle_mark_read(self, data):
+        """Handle marking messages as read"""
+        try:
+            reader_username = data.get('reader_username')
+            message_ids = data.get('message_ids', [])
+            
+            if not reader_username or not message_ids:
+                return
+            
+            # Get the reader user
+            reader_user = await sync_to_async(User.objects.get)(username=reader_username)
+            reader_profile = await sync_to_async(UserProfile.objects.get)(user=reader_user)
+            
+            # Mark messages as read
+            messages = await sync_to_async(lambda: list(
+                Message.objects.filter(
+                    id__in=message_ids,
+                    recipient=reader_profile,
+                    is_read=False
+                )
+            ))()
+            
+            if messages:
+                # Update messages to read
+                await sync_to_async(lambda: Message.objects.filter(
+                    id__in=[msg.id for msg in messages]
+                ).update(is_read=True))()
+                
+                # Broadcast read receipts
+                for message in messages:
+                    await self.channel_layer.group_send(
+                        self.room_group_name,
+                        {
+                            'type': 'read_receipt',
+                            'message_id': message.id,
+                            'reader_username': reader_username
+                        }
+                    )
+                    
+        except User.DoesNotExist:
+            await self.send(text_data=json.dumps({'error': 'User not found'}))
+        except UserProfile.DoesNotExist:
+            await self.send(text_data=json.dumps({'error': 'User profile not found'}))
+        except Exception as e:
+            await self.send(text_data=json.dumps({'error': str(e)}))
+    
+    async def typing_indicator(self, event):
+        """Send typing indicator to WebSocket"""
+        await self.send(text_data=json.dumps({
+            'action_type': 'typing_indicator',
+            'username': event['username'],
+            'is_typing': event['is_typing']
+        }))
+    
+    async def read_receipt(self, event):
+        """Send read receipt to WebSocket"""
+        await self.send(text_data=json.dumps({
+            'action_type': 'read_receipt',
+            'message_id': event['message_id'],
+            'reader_username': event['reader_username']
+        }))
+
+
+class ConversationListConsumer(AsyncWebsocketConsumer):
+    async def connect(self):
+        # Get user from the auth middleware
+        self.user = self.scope["user"]
+        if self.user.is_anonymous:
+            await self.close()
+            return
+        
+        # Create a unique group for this user's conversation updates
+        self.user_group_name = f'user_conversations_{self.user.id}'
+        
+        # Join user-specific conversation group
+        await self.channel_layer.group_add(
+            self.user_group_name,
+            self.channel_name
+        )
+        
+        await self.accept()
+    
+    async def disconnect(self, close_code):
+        # Leave user-specific conversation group
+        if hasattr(self, 'user_group_name'):
+            await self.channel_layer.group_discard(
+                self.user_group_name,
+                self.channel_name
+            )
+    
+    async def receive(self, text_data):
+        # This consumer mainly listens for updates, but can handle ping/pong
+        try:
+            data = json.loads(text_data)
+            if data.get('type') == 'ping':
+                await self.send(text_data=json.dumps({'type': 'pong'}))
+        except json.JSONDecodeError:
+            pass
+    
+    # Handle conversation updates
+    async def conversation_update(self, event):
+        """Send conversation update to WebSocket"""
+        await self.send(text_data=json.dumps({
+            'type': 'conversation_update',
+            'conversation': event['conversation'],
+            'is_new': event.get('is_new', False)
+        }))
+    
+    # Handle conversation deletion
+    async def conversation_delete(self, event):
+        """Send conversation deletion to WebSocket"""
+        await self.send(text_data=json.dumps({
+            'type': 'conversation_delete',
+            'conversation_id': event['conversation_id']
+        }))

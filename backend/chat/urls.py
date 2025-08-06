@@ -1,13 +1,22 @@
 from django.urls import path
-from .views import send_message, user_conversations, conversation_messages, send_message_in_conversation, create_conversation, edit_message, delete_message, delete_conversation
+from .views import (
+    SendMessageView,
+    UserConversationsView,
+    ConversationMessagesView,
+    SendMessageInConversationView,
+    CreateConversationView,
+    EditMessageView,
+    DeleteMessageView,
+    DeleteConversationView
+)
 
 urlpatterns = [
-    path('send-message/', send_message, name='send_message'),
-    path('conversations/', user_conversations, name='user_conversations'),
-    path('conversation/<int:conversation_id>/messages/', conversation_messages, name='conversation_messages'),
-    path('conversation/<int:conversation_id>/send-message/', send_message_in_conversation, name='send_message_in_conversation'),
-    path('create-conversation/', create_conversation, name='create_conversation'),
-    path('message/<int:message_id>/edit/', edit_message, name='edit_message'),
-    path('message/<int:message_id>/delete/', delete_message, name='delete_message'),
-    path('conversation/<int:conversation_id>/delete/', delete_conversation, name='delete_conversation')
+    path('send-message/', SendMessageView.as_view(), name='send_message'),
+    path('conversations/', UserConversationsView.as_view(), name='user_conversations'),
+    path('conversation/<int:conversation_id>/messages/', ConversationMessagesView.as_view(), name='conversation_messages'),
+    path('conversation/<int:conversation_id>/send-message/', SendMessageInConversationView.as_view(), name='send_message_in_conversation'),
+    path('create-conversation/', CreateConversationView.as_view(), name='create_conversation'),
+    path('message/<int:message_id>/edit/', EditMessageView.as_view(), name='edit_message'),
+    path('message/<int:message_id>/delete/', DeleteMessageView.as_view(), name='delete_message'),
+    path('conversation/<int:conversation_id>/delete/', DeleteConversationView.as_view(), name='delete_conversation')
 ]
