@@ -7,12 +7,11 @@ import { Navbar } from "../Navbar/Navbar";
 import InputField from "../../common/InputField";
 import Avatar from "../../common/Avatar";
 import Popup from "../../common/Popup";
-import usePagination from '../../../hooks/usePagination';
+// import usePagination from '../../../hooks/usePagination';
+import { useConversations, useDeleteConversation } from '../../../hooks/useConversations';
+import { useQueryClient } from '@tanstack/react-query';
 
 function ConversationList({ onConversationSelect, selectedConversationId }) {
-  const [conversations, setConversations] = useState([]);
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
   const currentUsername = localStorage.getItem("username");
   const navigate = useNavigate();
@@ -20,19 +19,48 @@ function ConversationList({ onConversationSelect, selectedConversationId }) {
   const [conversationToDelete, setConversationToDelete] = useState(null);
   const ws = useRef(null);
   const reconnectTimeoutRef = useRef(null);
+  const queryClient = useQueryClient();
 
-  // Pagination hook for conversations
+  // Pagination hook for conversations  
+  // const {
+  //   currentPage,
+  //   hasNext,
+  //   hasPrevious,
+  //   totalItems,
+  //   updatePaginationData,
+  //   nextPage,
+  //   previousPage,
+  //   loading: paginationLoading,
+  //   setLoading: setPaginationLoading
+  // } = usePagination(6); // 6 conversations per page
+
+  // React Query hooks - Using useInfiniteQuery for Load More functionality
   const {
-    currentPage,
-    hasNext,
-    hasPrevious,
-    totalItems,
-    updatePaginationData,
-    nextPage,
-    previousPage,
-    loading: paginationLoading,
-    setLoading: setPaginationLoading
-  } = usePagination(6); // 6 conversations per page
+    data: conversationsData,
+    isLoading,
+    error,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage
+  } = useConversations(8);
+
+  const deleteConversationMutation = useDeleteConversation();
+
+  // Extract and flatten conversations from all pages
+  const conversations = React.useMemo(() => {
+    if (!conversationsData?.pages) return [];
+    return conversationsData.pages.flatMap(page => page.conversations || []);
+  }, [conversationsData?.pages]);
+  
+  // Update pagination data from the last page
+  // React.useEffect(() => {
+  //   if (conversationsData?.pages?.length > 0) {
+  //     const lastPage = conversationsData.pages[conversationsData.pages.length - 1];
+  //     if (lastPage?.pagination) {
+  //       updatePaginationData(lastPage.pagination);
+  //     }
+  //   }
+  // }, [conversationsData?.pages, updatePaginationData]);
 
   // WebSocket connection for real-time conversation updates
   useEffect(() => {
@@ -54,29 +82,11 @@ function ConversationList({ onConversationSelect, selectedConversationId }) {
             const data = JSON.parse(e.data);
             
             if (data.type === 'conversation_update') {
-              const updatedConversation = data.conversation;
-              
-              setConversations((prevConversations) => {
-                const existingIndex = prevConversations.findIndex(
-                  conv => conv.id === updatedConversation.id
-                );
-                
-                if (existingIndex >= 0) {
-                  // Update existing conversation
-                  const updated = [...prevConversations];
-                  updated[existingIndex] = updatedConversation;
-                  // Move to top for new messages
-                  const [conversation] = updated.splice(existingIndex, 1);
-                  return [conversation, ...updated];
-                } else {
-                  // Add new conversation to the top
-                  return [updatedConversation, ...prevConversations];
-                }
-              });
+              // Invalidate conversations query to refetch fresh data
+              queryClient.invalidateQueries({ queryKey: ['conversations'] });
             } else if (data.type === 'conversation_delete') {
-              setConversations((prevConversations) =>
-                prevConversations.filter(conv => conv.id !== data.conversation_id)
-              );
+              // Invalidate conversations query to refetch fresh data
+              queryClient.invalidateQueries({ queryKey: ['conversations'] });
             }
           } catch (err) {
             console.error('Error parsing WebSocket message:', err);
@@ -115,44 +125,7 @@ function ConversationList({ onConversationSelect, selectedConversationId }) {
     };
   }, []);
   
-  // Load initial conversations
-  useEffect(() => {
-    fetchConversations();
-  }, [currentPage]);
-
-  const fetchConversations = async () => {
-    try {
-      // Only show loading skeleton for initial load (page 1)
-      if (currentPage === 1) {
-        setLoading(true);
-      }
-      setPaginationLoading(true);
-      
-      const response = await axiosInstance.get(
-        `${ENV.BASE_API_URL}/chat/api/conversations/?page=${currentPage}&page_size=8`
-      );
-      
-      console.log('Conversations API Response:', response.data);
-      
-      if (currentPage === 1) {
-        setConversations(response.data.conversations);
-      } else {
-        setConversations((prev) => [...prev, ...response.data.conversations]);
-      }
-      
-      if (response.data.pagination) {
-        console.log('Conversations Pagination Data:', response.data.pagination);
-        updatePaginationData(response.data.pagination);
-      }
-    } catch (err) {
-      setError("Failed to fetch conversations");
-    } finally {
-      if (currentPage === 1) {
-        setLoading(false);
-      }
-      setPaginationLoading(false);
-    }
-  };
+  // No need for manual fetch - React Query handles this automatically
 
   const getOtherParticipant = (participants) => {
     return participants.find(p => p.username !== currentUsername) || participants[0];
@@ -205,38 +178,21 @@ function ConversationList({ onConversationSelect, selectedConversationId }) {
     setShowDeletePopup(true);
   };
 
-  // Only perform deletion if confirmed in popup
-  const handleDeleteConversation = async () => {
+  // Only perform deletion if confirmed in popup using React Query mutation
+  const handleDeleteConversation = () => {
     if (!conversationToDelete) return;
-    try {
-      console.log(`Attempting to delete conversation ${conversationToDelete}`);
-      console.log('Current user:', currentUsername);
-      
-      const response = await axiosInstance.delete(`${ENV.BASE_API_URL}/chat/api/conversation/${conversationToDelete}/delete/`);
-      console.log('Delete response:', response.data);
-      
-      setConversations(prev => prev.filter(conv => conv.id !== conversationToDelete));
-      setShowDeletePopup(false);
-      setConversationToDelete(null);
-      setError(""); // Clear any previous errors
-    } catch (error) {
-      console.error("Failed to delete conversation:", error);
-      console.error("Error response:", error.response?.data);
-      console.error("Error status:", error.response?.status);
-      
-      let errorMessage = "Failed to delete conversation";
-      if (error.response?.status === 403) {
-        errorMessage = "Access denied. You don't have permission to delete this conversation.";
-      } else if (error.response?.status === 404) {
-        errorMessage = "Conversation not found.";
-      } else if (error.response?.data?.error) {
-        errorMessage = error.response.data.error;
+    
+    deleteConversationMutation.mutate(conversationToDelete, {
+      onSuccess: () => {
+        setShowDeletePopup(false);
+        setConversationToDelete(null);
+      },
+      onError: (error) => {
+        console.error("Failed to delete conversation:", error);
+        setShowDeletePopup(false);
+        setConversationToDelete(null);
       }
-      
-      setError(errorMessage);
-      setShowDeletePopup(false);
-      setConversationToDelete(null);
-    }
+    });
   };
 
   return (
@@ -299,14 +255,23 @@ function ConversationList({ onConversationSelect, selectedConversationId }) {
           {error && (
             <div className="m-4">
               <div className="bg-red-50 text-red-600 p-4 rounded-lg">
-                {error}
+                {error?.message || 'Failed to load conversations'}
+              </div>
+            </div>
+          )}
+          
+          {/* Delete error message */}
+          {deleteConversationMutation.error && (
+            <div className="m-4">
+              <div className="bg-red-50 text-red-600 p-4 rounded-lg">
+                {deleteConversationMutation.error?.message || 'Failed to delete conversation'}
               </div>
             </div>
           )}
 
           {/* Conversations List */}
           <div className="h-[calc(100vh-180px)] overflow-y-auto">
-            {loading ? (
+            {isLoading ? (
               // Loading Skeletons
               [...Array(6)].map((_, i) => (
                 <div key={i} className="px-4 py-4 border-b border-gray-100 animate-pulse">
@@ -412,20 +377,20 @@ function ConversationList({ onConversationSelect, selectedConversationId }) {
               })
             )}
             
-            {/* Load More Button */}
-            {hasNext && (
+            {/* Load More Button - Using React Query infinite query */}
+            {hasNextPage && (
               <div className="p-4 border-t border-gray-200">
                 <button
-                  onClick={nextPage}
-                  disabled={paginationLoading}
+                  onClick={() => fetchNextPage()}
+                  disabled={isFetchingNextPage}
                   className="w-full py-2 px-4 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
                 >
-                  {paginationLoading ? (
+                  {isFetchingNextPage ? (
                     <div className="animate-spin rounded-full h-4 w-4 border-2 border-gray-500 border-t-transparent"></div>
                   ) : (
                     <ChevronDown size={16} />
                   )}
-                  {paginationLoading ? 'Loading...' : 'Load More Conversations'}
+                  {isFetchingNextPage ? 'Loading...' : 'Load More Conversations'}
                 </button>
               </div>
             )}
