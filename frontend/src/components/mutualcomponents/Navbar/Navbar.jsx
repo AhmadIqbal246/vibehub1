@@ -16,7 +16,7 @@ export const Navbar = () => {
 
   const navItems = [
     { id: 'dashboard', icon: Home, label: 'Dashboard', path: '/chat-dashboard', color: 'bg-indigo-500' },
-    { id: 'inbox', icon: Mail, label: 'Inbox', path: '/chat/1', color: 'bg-blue-500', badge: 3 },
+    { id: 'inbox', icon: Mail, label: 'Inbox', path: '/chat', color: 'bg-blue-500', badge: 3 },
     { id: 'users', icon: Users, label: 'Users', path: '/users', color: 'bg-purple-500' },
     { id: 'settings', icon: Settings, label: 'Settings', path: '/settings', color: 'bg-teal-500' },
   ];

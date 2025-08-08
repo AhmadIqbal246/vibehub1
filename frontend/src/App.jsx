@@ -10,6 +10,7 @@ import ChatPage from "./pages/ChatDashboardPage/ChatPage";
 import ConversationList from "./components/mutualcomponents/Conversations/ConversationList";
 import NewConversation from "./components/mutualcomponents/Conversations/NewConversation";
 import ChatDashboard from "./pages/ChatDashboardPage/ChatDashboard";
+import ChatInterface from "./components/chat/ChatInterface";
 
 /**
  * App Component - Handles only routing logic
@@ -30,6 +31,14 @@ function App() {
           element={
             <ProtectedRoute>
               <UserProfile />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/chat"
+          element={
+            <ProtectedRoute>
+              <ChatPage />
             </ProtectedRoute>
           }
         />
@@ -65,6 +74,7 @@ function App() {
             </ProtectedRoute>
           }
         />
+
         <Route
           path="/chat-dashboard"
           element={
