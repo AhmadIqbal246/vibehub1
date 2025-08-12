@@ -65,8 +65,16 @@ def get_user_data(validated_data):
     # Ensure profile exists even if user already existed
     UserProfile.objects.get_or_create(user=user)
 
+    # Generate JWT tokens instead of session
+    refresh = RefreshToken.for_user(user)
+    tokens = {
+        'access': str(refresh.access_token),
+        'refresh': str(refresh),
+    }
+
     return {
         'user': user,
+        'tokens': tokens,
         'profile_data': {
             'email': user.email,
             'first_name': user.first_name,

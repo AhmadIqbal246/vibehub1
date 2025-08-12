@@ -21,15 +21,30 @@ const LoginPage = () => {
     const searchParams = new URLSearchParams(location.search);
     const googleSuccess = searchParams.get('google_success');
     const googleError = searchParams.get('error');
+    const accessToken = searchParams.get('access');
+    const refreshToken = searchParams.get('refresh');
     
-    if (googleSuccess === 'true') {
+    if (googleSuccess === 'true' && accessToken && refreshToken) {
+      // Store JWT tokens from Google OAuth redirect
+      localStorage.setItem('access_token', accessToken);
+      localStorage.setItem('refresh_token', refreshToken);
+      
+      // Fetch user data and update Redux state
       dispatch(handleGoogleLoginSuccess())
         .then((result) => {
           if (result.success) {
+            // Clean URL and navigate
             const from = location.state?.from?.pathname || "/profile";
             navigate(from, { replace: true });
           }
+        })
+        .catch(() => {
+          // If fetching user data fails, clear tokens
+          localStorage.clear();
         });
+      
+      // Clean URL immediately
+      navigate('/login', { replace: true });
     } else if (googleError === 'google_login_failed') {
       dispatch({ type: 'auth/setError', payload: 'Google login failed. Please try again.' });
       // Clear the error parameter from URL
