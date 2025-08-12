@@ -3,9 +3,9 @@ from django.conf import settings
 from rest_framework.views import APIView
 from .serializers import AuthSerializer
 from .services import get_user_data
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
-from django.contrib.auth import logout
+from django.contrib.auth import logout, authenticate
 from django.http import JsonResponse
 from .serializers import PhoneNumberSerializer
 from django.views.decorators.csrf import ensure_csrf_cookie
@@ -13,14 +13,47 @@ from django.utils.decorators import method_decorator
 from .models import UserProfile
 from .serializers import ManualSignupSerializer
 from django.contrib.auth.models import User
-from django.contrib.auth import authenticate, login
 from django.views.decorators.csrf import csrf_exempt,ensure_csrf_cookie, csrf_protect
 from django.utils.decorators import method_decorator
-from rest_framework.permissions import AllowAny
+from rest_framework_simplejwt.tokens import RefreshToken
+from rest_framework_simplejwt.exceptions import TokenError, InvalidToken
 
+
+def create_jwt_response(user, message="Success"):
+    """Create standardized JWT response with user data and tokens"""
+    refresh = RefreshToken.for_user(user)
+    
+    # Get profile data
+    try:
+        profile = user.userprofile
+        profile_data = {
+            'phone_number': profile.phone_number,
+            'profile_picture_url': profile.profile_picture_url,
+            'bio': profile.bio,
+            'date_of_birth': profile.date_of_birth,
+            'gender': profile.gender,
+            'gender_display': profile.get_gender_display() if profile.gender else "",
+        }
+    except:
+        profile_data = {}
+    
+    return Response({
+        'message': message,
+        'access': str(refresh.access_token),
+        'refresh': str(refresh),
+        'user': {
+            'id': user.id,
+            'username': user.username,
+            'email': user.email,
+            'first_name': user.first_name,
+            'last_name': user.last_name,
+            **profile_data
+        }
+    })
 
 
 class GoogleLoginApi(APIView):
+    permission_classes = [AllowAny]
     def get(self, request, *args, **kwargs):
         try:
             auth_serializer = AuthSerializer(data=request.GET)
@@ -29,10 +62,16 @@ class GoogleLoginApi(APIView):
             validated_data = auth_serializer.validated_data
             data = get_user_data(validated_data)
 
+            # Get JWT tokens instead of creating session
             user = data['user']
-            login(request, user)
-
-            return redirect(f"{settings.BASE_APP_URL}/login?google_success=true")
+            tokens = data['tokens']
+            access_token = tokens['access']
+            refresh_token = tokens['refresh']
+            
+            # Redirect to frontend with JWT tokens as URL parameters
+            redirect_url = f"{settings.BASE_APP_URL}/login?google_success=true&access={access_token}&refresh={refresh_token}"
+            return redirect(redirect_url)
+            
         except Exception as e:
             # Log the error and redirect to login with error message
             print(f"Google login error: {str(e)}")
@@ -63,9 +102,23 @@ class CurrentUserApi(APIView):
 
 
 class LogoutApi(APIView):
-    def get(self, request, *args, **kwargs):
-        logout(request)
-        return JsonResponse({'message': 'Logged out successfully'}, status=200)
+    permission_classes = [IsAuthenticated]
+    
+    def post(self, request, *args, **kwargs):
+        try:
+            # Try to blacklist the refresh token if provided
+            refresh_token = request.data.get("refresh")
+            if refresh_token:
+                token = RefreshToken(refresh_token)
+                token.blacklist()
+            
+            # Also logout session (for backward compatibility)
+            logout(request)
+            return JsonResponse({'message': 'Logged out successfully'}, status=200)
+        except (TokenError, InvalidToken):
+            # Even if token blacklisting fails, still logout successfully
+            logout(request)
+            return JsonResponse({'message': 'Logged out successfully'}, status=200)
 
 
 class UpdateUserProfile(APIView):
@@ -118,23 +171,24 @@ class GetCSRFToken(APIView):
         return Response({'message': 'CSRF cookie set'})
     
 
-@method_decorator(csrf_exempt, name='dispatch')  # optional
 class ManualSignupView(APIView):
-    authentication_classes = []  # ✅ No CSRF check
     permission_classes = [AllowAny]
+    authentication_classes = []  # Disable CSRF for JWT signup
 
     def post(self, request):
         serializer = ManualSignupSerializer(data=request.data)
         if serializer.is_valid():
             user = serializer.save()
-            login(request, user)
-            return Response({'message': 'Signup successful'})
+            # Return JWT tokens instead of creating session
+            return create_jwt_response(user, "Signup successful")
         return Response(serializer.errors, status=400)
     
 
 
-@method_decorator(csrf_protect, name='dispatch')  # ✅ Use csrf_protect instead of csrf_exempt
 class ManualLoginView(APIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []  # Disable CSRF for JWT login
+    
     def post(self, request):
         email = request.data.get('email')
         password = request.data.get('password')
@@ -147,7 +201,7 @@ class ManualLoginView(APIView):
         user = authenticate(request, username=user.username, password=password)
 
         if user is not None:
-            login(request, user)
-            return Response({'message': 'Login successful'})
+            # Return JWT tokens instead of creating session
+            return create_jwt_response(user, "Login successful")
         else:
             return Response({'detail': 'Invalid password'}, status=400)

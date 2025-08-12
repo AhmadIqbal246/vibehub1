@@ -4,27 +4,57 @@ import { setLoading, setError, loginSuccess, signupSuccess, updateProfileSuccess
 import axiosInstance from '../../utils/axiosConfig';
 
 // Helper function to handle API errors
-const handleApiError = (error, thunkAPI) => {
+const handleApiError = (error, dispatch) => {
   const errorMessage = error?.response?.data?.detail || 'An error occurred';
-  thunkAPI.dispatch(setError(errorMessage));
-  return thunkAPI.rejectWithValue(errorMessage);
+  if (dispatch) {
+    dispatch(setError(errorMessage));
+  }
+  return { success: false, error: errorMessage };
 };
 
 // Initialize auth state
 export const initializeAuthState = () => async (dispatch) => {
   try {
-    const username = localStorage.getItem("username");
-    if (!username) {
+    const accessToken = localStorage.getItem('access_token');
+    const refreshToken = localStorage.getItem('refresh_token');
+    
+    console.log('Initializing auth state:', { 
+      hasAccessToken: !!accessToken, 
+      hasRefreshToken: !!refreshToken 
+    });
+    
+    if (!accessToken || !refreshToken) {
+      console.log('No tokens found, initializing as logged out');
       dispatch(initializeAuth());
       return;
     }
 
     dispatch(setLoading(true));
-    const response = await axiosInstance.get(`${ENV.BASE_API_URL}/auth/api/user/`);
-    dispatch(loginSuccess(response.data));
+    
+    try {
+      // Try to fetch current user data to validate token
+      console.log('Validating token by fetching user data...');
+      const response = await axiosInstance.get(`${ENV.BASE_API_URL}/auth/api/user/`);
+      console.log('Token valid, user data fetched:', response.data);
+      
+      // Update user data in localStorage
+      localStorage.setItem('user', JSON.stringify(response.data));
+      localStorage.setItem('username', response.data.username);
+      
+      dispatch(loginSuccess(response.data));
+      dispatch(setLoading(false));
+    } catch (apiError) {
+      console.log('Token validation failed, clearing storage:', apiError);
+      // Token is invalid - clear all stored data
+      localStorage.clear();
+      dispatch(logout());
+      dispatch(setLoading(false));
+    }
   } catch (error) {
-    localStorage.removeItem("username");
+    console.error('Auth initialization error:', error);
+    localStorage.clear();
     dispatch(logout());
+    dispatch(setLoading(false));
   }
 };
 
@@ -37,7 +67,7 @@ export const handleGoogleLoginSuccess = () => async (dispatch) => {
     dispatch(loginSuccess(response.data));
     return { success: true, data: response.data };
   } catch (error) {
-    return handleApiError(error, { dispatch });
+    return handleApiError(error, dispatch);
   }
 };
 
@@ -46,7 +76,8 @@ export const loginUser = (formData) => async (dispatch) => {
   try {
     dispatch(setLoading(true));
     
-    await axiosInstance.post(
+    // Login request now returns JWT tokens
+    const response = await axiosInstance.post(
       `${ENV.BASE_API_URL}/auth/api/manual-login/`,
       formData,
       {
@@ -56,16 +87,18 @@ export const loginUser = (formData) => async (dispatch) => {
       }
     );
 
-    // Fetch user data after successful login
-    const userResponse = await axiosInstance.get(
-      `${ENV.BASE_API_URL}/auth/api/user/`
-    );
-
-    localStorage.setItem("username", userResponse.data.username);
-    dispatch(loginSuccess(userResponse.data));
-    return { success: true, data: userResponse.data };
+    const { access, refresh, user } = response.data;
+    
+    // Store JWT tokens and user data
+    localStorage.setItem('access_token', access);
+    localStorage.setItem('refresh_token', refresh);
+    localStorage.setItem('user', JSON.stringify(user));
+    localStorage.setItem('username', user.username); // Keep for backward compatibility
+    
+    dispatch(loginSuccess(user));
+    return { success: true, data: user };
   } catch (error) {
-    return handleApiError(error, { dispatch });
+    return handleApiError(error, dispatch);
   }
 };
 
@@ -74,6 +107,7 @@ export const signupUser = (formData) => async (dispatch) => {
   try {
     dispatch(setLoading(true));
 
+    // Signup request now returns JWT tokens
     const response = await axiosInstance.post(
       `${ENV.BASE_API_URL}/auth/api/manual-signup/`,
       formData,
@@ -84,16 +118,18 @@ export const signupUser = (formData) => async (dispatch) => {
       }
     );
 
-    // Fetch user data after successful signup
-    const userResponse = await axiosInstance.get(
-      `${ENV.BASE_API_URL}/auth/api/user/`
-    );
-
-    localStorage.setItem("username", userResponse.data.username);
-    dispatch(signupSuccess(userResponse.data));
-    return userResponse.data;
+    const { access, refresh, user } = response.data;
+    
+    // Store JWT tokens and user data
+    localStorage.setItem('access_token', access);
+    localStorage.setItem('refresh_token', refresh);
+    localStorage.setItem('user', JSON.stringify(user));
+    localStorage.setItem('username', user.username); // Keep for backward compatibility
+    
+    dispatch(signupSuccess(user));
+    return user;
   } catch (error) {
-    return handleApiError(error, { dispatch });
+    return handleApiError(error, dispatch);
   }
 };
 
@@ -109,7 +145,7 @@ export const fetchCurrentUser = () => async (dispatch) => {
     return response.data;
   } catch (error) {
     dispatch(logout());
-    return handleApiError(error, { dispatch });
+    return handleApiError(error, dispatch);
   }
 };
 
@@ -148,13 +184,23 @@ export const updateProfile = createAsyncThunk(
 // Async thunk for logout
 export const logoutUser = () => async (dispatch) => {
   try {
-    await axiosInstance.get(
-      `${ENV.BASE_API_URL}/auth/api/logout/`
-    );
-    localStorage.removeItem("username");
+    const refreshToken = localStorage.getItem('refresh_token');
+    
+    // Send POST request with refresh token to blacklist it
+    if (refreshToken) {
+      await axiosInstance.post(
+        `${ENV.BASE_API_URL}/auth/api/logout/`,
+        { refresh: refreshToken }
+      );
+    }
+    
+    // Clear all stored data
+    localStorage.clear();
     dispatch(logout());
   } catch (error) {
     console.error("Logout failed", error);
-    dispatch(logout()); // Still logout on frontend even if API call fails
+    // Still logout on frontend even if API call fails
+    localStorage.clear();
+    dispatch(logout());
   }
-}; 
+};

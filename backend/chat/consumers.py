@@ -11,6 +11,22 @@ from django.conf import settings
 import random
 from channels.db import database_sync_to_async
 from django.shortcuts import get_object_or_404
+from rest_framework_simplejwt.tokens import UntypedToken
+from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
+from urllib.parse import parse_qs
+
+@database_sync_to_async
+def get_user_from_jwt(token_string):
+    """Get user from JWT token for WebSocket authentication"""
+    try:
+        UntypedToken(token_string)
+        from rest_framework_simplejwt.authentication import JWTAuthentication
+        jwt_auth = JWTAuthentication()
+        validated_token = jwt_auth.get_validated_token(token_string)
+        user = jwt_auth.get_user(validated_token)
+        return user
+    except (InvalidToken, TokenError):
+        return None
 
 def generate_unique_phone_number():
     while True:
@@ -20,13 +36,25 @@ def generate_unique_phone_number():
 
 class ChatConsumer(AsyncWebsocketConsumer):
     async def connect(self):
-        self.conversation_id = self.scope['url_route']['kwargs']['conversation_id']
-        self.room_group_name = f'chat_{self.conversation_id}'
-        await self.channel_layer.group_add(
-            self.room_group_name,
-            self.channel_name
-        )
-        await self.accept()
+        # Get token from query string for JWT authentication
+        query_string = self.scope['query_string'].decode()
+        query_params = parse_qs(query_string)
+        token = query_params.get('token', [None])[0]
+        
+        if token:
+            self.user = await get_user_from_jwt(token)
+            if self.user and not self.user.is_anonymous:
+                self.conversation_id = self.scope['url_route']['kwargs']['conversation_id']
+                self.room_group_name = f'chat_{self.conversation_id}'
+                await self.channel_layer.group_add(
+                    self.room_group_name,
+                    self.channel_name
+                )
+                await self.accept()
+            else:
+                await self.close()
+        else:
+            await self.close()
 
     async def disconnect(self, close_code):
         await self.channel_layer.group_discard(
