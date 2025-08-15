@@ -1,7 +1,7 @@
 from pathlib import Path
 from decouple import Config, RepositoryEnv
 import os
-
+#  celery -A backend worker --pool=solo --loglevel=info
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -171,9 +171,33 @@ SIMPLE_JWT = {
 # Channels configuration
 CHANNEL_LAYERS = {
     "default": {
-        "BACKEND": "channels.layers.InMemoryChannelLayer",
+        "BACKEND": "channels_redis.core.RedisChannelLayer",
+        "CONFIG": {
+            "hosts": [("127.0.0.1", 6379)],  # Redis DB 0 for channels
+        },
     },
 }
+
+# Celery Configuration
+CELERY_BROKER_URL = 'redis://localhost:6379/1'  # Different DB from channels
+CELERY_RESULT_BACKEND = 'redis://localhost:6379/1'
+CELERY_ACCEPT_CONTENT = ['json']
+CELERY_TASK_SERIALIZER = 'json'
+CELERY_RESULT_SERIALIZER = 'json'
+CELERY_TIMEZONE = 'UTC'
+CELERY_BEAT_SCHEDULE = {}
+CELERY_TASK_TRACK_STARTED = True
+CELERY_TASK_TIME_LIMIT = 30 * 60  # 30 minutes
+CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True  # Fix for Celery 6.0+ deprecation warning
+
+# Email Configuration
+EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+EMAIL_HOST = 'smtp.gmail.com'
+EMAIL_PORT = 587
+EMAIL_USE_TLS = True
+EMAIL_HOST_USER = 'ahmadiqbalhsp@gmail.com'
+EMAIL_HOST_PASSWORD = 'ovaf yvjs qhga czle'
+DEFAULT_FROM_EMAIL = EMAIL_HOST_USER
 
 # Logging for chat consumers
 LOGGING = {
@@ -186,6 +210,14 @@ LOGGING = {
     },
     'loggers': {
         'chat.consumers': {
+            'handlers': ['console'],
+            'level': 'INFO',
+        },
+        'chat.tasks': {
+            'handlers': ['console'],
+            'level': 'INFO',
+        },
+        'chat.models': {
             'handlers': ['console'],
             'level': 'INFO',
         },
