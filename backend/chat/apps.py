@@ -6,5 +6,5 @@ class ChatConfig(AppConfig):
     name = 'chat'
     
     def ready(self):
-        # Import models to ensure signals are connected
-        import chat.models
+        # Import signals to ensure they are connected
+        import chat.signals
