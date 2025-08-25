@@ -44,6 +44,7 @@ function ChatInterface({
   const typingTimeoutRef = useRef(null);
   // Add state for tracking visible messages for read receipts
   const visibleMessagesRef = useRef(new Set());
+  const lastReadMessageRef = useRef(null);
   
   // Pagination state for messages
   const {
@@ -123,7 +124,9 @@ function ChatInterface({
     setTimeout(() => {
       try {
         const wsScheme = window.location.protocol === "https:" ? "wss" : "ws";
-        const wsUrl = `${wsScheme}://localhost:8000/ws/chat/${convId}/`;
+        // Get JWT token from localStorage and add it as query parameter
+        const token = localStorage.getItem('access_token');
+        const wsUrl = `${wsScheme}://localhost:8000/ws/chat/${convId}/${token ? `?token=${token}` : ''}`;
 
         setConnectionStatus("Connecting...");
         ws.current = new WebSocket(wsUrl);
@@ -489,6 +492,19 @@ function ChatInterface({
     }
   };
 
+  // Send read receipts for messages via WebSocket
+  const markMessagesAsRead = (messageIds) => {
+    if (ws.current && ws.current.readyState === WebSocket.OPEN && messageIds.length > 0) {
+      const readData = {
+        action_type: 'mark_read',
+        reader_username: currentUsername,
+        message_ids: messageIds
+      };
+      ws.current.send(JSON.stringify(readData));
+      console.log('Sent read receipts for messages:', messageIds);
+    }
+  };
+
   // Scroll to bottom only for new real-time messages or initial load
   useEffect(() => {
     if (messages.length === 0) return;
@@ -515,6 +531,26 @@ function ChatInterface({
     
     messagesRef.current = messages;
   }, [messages]);
+
+  // Mark messages as read when they become visible
+  useEffect(() => {
+    if (messages.length > 0 && selectedConversation) {
+      // Get unread messages from other users that need to be marked as read
+      const unreadMessages = messages.filter(msg => 
+        msg.sender_username !== currentUsername && !msg.is_read
+      );
+      
+      if (unreadMessages.length > 0) {
+        const messageIds = unreadMessages.map(msg => msg.id);
+        // Mark as read after a short delay (user has time to see them)
+        const readTimeout = setTimeout(() => {
+          markMessagesAsRead(messageIds);
+        }, 1000);
+        
+        return () => clearTimeout(readTimeout);
+      }
+    }
+  }, [messages, currentUsername, selectedConversation]);
 
   // Cleanup WebSocket on unmount
   useEffect(() => {
