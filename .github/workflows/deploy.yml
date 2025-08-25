@@ -9,30 +9,22 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # 1. Checkout repo
       - name: Checkout Repo
         uses: actions/checkout@v4
 
-      - name: Copy project to EC2 (exclude heavy/unneeded files)
-        uses: appleboy/scp-action@v0.1.7
+      # 2. Copy project to EC2 using rsync (supports exclude)
+      - name: Sync project to EC2
+        uses: burnett01/rsync-deployments@5.2
         with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.EC2_KEY }}
-          source: |
-            backend/**
-            frontend/**
-            docker-compose.yml
-          target: "~/app"
-          overwrite: true
-          strip_components: 0
-          rm: false
-          exclude: |
-            **/.git/**
-            **/.github/**
-            **/node_modules/**
-            backend/media/**
-            backend/staticfiles/**
+          switches: -avzr --delete --exclude='.git/' --exclude='.github/' --exclude='node_modules/' --exclude='backend/media/' --exclude='backend/staticfiles/'
+          path: ./
+          remote_path: ~/app
+          remote_host: ${{ secrets.EC2_HOST }}
+          remote_user: ${{ secrets.EC2_USER }}
+          remote_key: ${{ secrets.EC2_KEY }}
 
+      # 3. SSH into EC2 and deploy with Docker Compose
       - name: Deploy with Docker Compose on EC2
         uses: appleboy/ssh-action@v0.1.10
         with:
@@ -42,11 +34,16 @@ jobs:
           script: |
             set -e
             cd ~/app
-            # Ensure env file exists on server (not uploaded via git)
+            echo "✅ Files synced to EC2"
+
+            # Ensure env file exists (must be manually placed once)
             if [ ! -f backend/.env.production ]; then
               echo "ERROR: backend/.env.production not found on server" >&2
               exit 1
             fi
+
+            # Restart containers
             docker-compose down
             docker-compose up -d --build
             docker-compose ps
+            echo "🚀 Deployment finished"
