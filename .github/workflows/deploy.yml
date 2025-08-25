@@ -17,7 +17,7 @@ jobs:
       - name: Sync project to EC2
         uses: burnett01/rsync-deployments@5.2
         with:
-          switches: -avzr --delete --exclude='.git/' --exclude='.github/' --exclude='node_modules/' --exclude='backend/media/' --exclude='backend/staticfiles/'
+          switches: -avzr --delete --exclude='.git/' --exclude='.github/' --exclude='node_modules/' --exclude='backend/media/' --exclude='backend/staticfiles/' --exclude='.env'
           path: ./
           remote_path: ~/app
           remote_host: ${{ secrets.EC2_HOST }}
@@ -36,9 +36,9 @@ jobs:
             cd ~/app
             echo "✅ Files synced to EC2"
 
-            # Ensure env file exists (must be manually placed once)
-            if [ ! -f .env.production ]; then
-              echo "ERROR: .env.production not found on server" >&2
+            # Ensure root-level .env file exists (Compose auto-loads it)
+            if [ ! -f .env ]; then
+              echo "ERROR: .env not found in ~/app (same directory as docker-compose.yml)" >&2
               exit 1
             fi
 
