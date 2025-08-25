@@ -19,7 +19,7 @@ jobs:
         with:
           switches: -avzr --delete --exclude='.git/' --exclude='.github/' --exclude='node_modules/' --exclude='backend/media/' --exclude='backend/staticfiles/' --exclude='.env'
           path: ./
-          remote_path: ~/app
+          remote_path: ~/vibehub1
           remote_host: ${{ secrets.EC2_HOST }}
           remote_user: ${{ secrets.EC2_USER }}
           remote_key: ${{ secrets.EC2_KEY }}
@@ -33,12 +33,12 @@ jobs:
           key: ${{ secrets.EC2_KEY }}
           script: |
             set -e
-            cd ~/app
+            cd ~/vibehub1
             echo "✅ Files synced to EC2"
 
             # Ensure root-level .env file exists (Compose auto-loads it)
             if [ ! -f .env ]; then
-              echo "ERROR: .env not found in ~/app (same directory as docker-compose.yml)" >&2
+              echo "ERROR: .env not found in ~/vibehub1 (same directory as docker-compose.yml)" >&2
               exit 1
             fi
 
