@@ -37,8 +37,8 @@ jobs:
             echo "✅ Files synced to EC2"
 
             # Ensure env file exists (must be manually placed once)
-            if [ ! -f backend/.env.production ]; then
-              echo "ERROR: backend/.env.production not found on server" >&2
+            if [ ! -f backend/.env ]; then
+              echo "ERROR: backend/.env not found on server" >&2
               exit 1
             fi
 
