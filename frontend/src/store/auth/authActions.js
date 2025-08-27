@@ -197,10 +197,18 @@ export const logoutUser = () => async (dispatch) => {
     // Clear all stored data
     localStorage.clear();
     dispatch(logout());
+    
+    // Reset notification state on logout
+    const { resetNotificationState } = await import('../notifications/notificationSlice');
+    dispatch(resetNotificationState());
   } catch (error) {
     console.error("Logout failed", error);
     // Still logout on frontend even if API call fails
     localStorage.clear();
     dispatch(logout());
+    
+    // Reset notification state on logout even if API call failed
+    const { resetNotificationState } = await import('../notifications/notificationSlice');
+    dispatch(resetNotificationState());
   }
 };
