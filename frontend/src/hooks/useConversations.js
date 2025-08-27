@@ -26,7 +26,12 @@ export const useConversations = (pageSize = 8) => {
       // Return next page number if there are more pages, otherwise undefined
       return lastPage.pagination?.has_next ? lastPage.pagination.page + 1 : undefined;
     },
-    staleTime: 30000, // Consider fresh for 30 seconds
+    staleTime: 1000, // Very short stale time for real-time updates (1 second)
+    refetchOnWindowFocus: true, // Refetch when window gets focus
+    refetchOnReconnect: true, // Refetch when reconnecting
+    refetchInterval: false, // Don't auto-refetch on interval, rely on WebSocket updates
+    retry: 3, // Retry failed requests
+    refetchOnMount: 'always', // Always refetch when component mounts
   });
 };
 

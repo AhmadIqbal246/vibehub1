@@ -7,6 +7,8 @@ import Avatar from "../common/Avatar";
 import EmojiPicker from 'emoji-picker-react';
 import usePagination from '../../hooks/usePagination';
 import AudioMessage from './AudioMessage';
+import { useDispatch } from 'react-redux';
+import { resetConversationCount, setActiveConversation, clearActiveConversation } from '../../store/notifications/notificationSlice';
 
 function ChatInterface({ 
   selectedConversation, 
@@ -34,6 +36,7 @@ function ChatInterface({
   const reconnectTimeoutRef = useRef(null);
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
+  const dispatch = useDispatch();
   // Add state for recipient phone chat
   const [recipientProfile, setRecipientProfile] = useState(null);
   // Add state for message options on mobile
@@ -104,6 +107,12 @@ function ChatInterface({
 
       loadInitialConversation();
       connectWebSocket(selectedConversation.id);
+      
+      // Set active conversation to prevent notifications
+      dispatch(setActiveConversation(selectedConversation.id.toString()));
+      
+      // Clear notification count when conversation is opened
+      dispatch(resetConversationCount({ conversationId: selectedConversation.id.toString() }));
     } else if (recipientPhone) {
       // No conversation yet, clear messages
       setMessages([]);
@@ -112,8 +121,17 @@ function ChatInterface({
       // No conversation or recipient, clear everything
       setMessages([]);
       setError("");
+      // Clear active conversation when no conversation is selected
+      dispatch(clearActiveConversation());
     }
-  }, [selectedConversation, recipientPhone]);
+    
+    // Cleanup: clear active conversation when component unmounts or conversation changes
+    return () => {
+      if (selectedConversation) {
+        dispatch(clearActiveConversation());
+      }
+    };
+  }, [selectedConversation, recipientPhone, dispatch]);
 
   // WebSocket connection
   const connectWebSocket = (convId) => {
@@ -550,12 +568,29 @@ function ChatInterface({
         // Mark as read after a short delay (user has time to see them)
         const readTimeout = setTimeout(() => {
           markMessagesAsRead(messageIds);
-        }, 1000);
+          // Clear notification count immediately when messages are marked as read
+          dispatch(resetConversationCount({ conversationId: selectedConversation.id.toString() }));
+        }, 500); // Reduced delay for faster clearing
         
         return () => clearTimeout(readTimeout);
       }
     }
-  }, [messages, currentUsername, selectedConversation]);
+  }, [messages, currentUsername, selectedConversation, dispatch]);
+
+  // Additional effect to clear notifications when conversation is opened and has no unread messages
+  useEffect(() => {
+    if (selectedConversation && messages.length > 0) {
+      // Check if there are any unread messages from other users
+      const hasUnreadFromOthers = messages.some(msg => 
+        msg.sender_username !== currentUsername && !msg.is_read
+      );
+      
+      // If no unread messages, ensure notification count is cleared
+      if (!hasUnreadFromOthers) {
+        dispatch(resetConversationCount({ conversationId: selectedConversation.id.toString() }));
+      }
+    }
+  }, [selectedConversation, messages, currentUsername, dispatch]);
 
   // Cleanup WebSocket on unmount
   useEffect(() => {

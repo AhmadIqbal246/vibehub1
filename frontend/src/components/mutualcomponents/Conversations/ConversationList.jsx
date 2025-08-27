@@ -10,6 +10,8 @@ import Popup from "../../common/Popup";
 // import usePagination from '../../../hooks/usePagination';
 import { useConversations, useDeleteConversation } from '../../../hooks/useConversations';
 import { useQueryClient } from '@tanstack/react-query';
+import { useSelector, useDispatch } from 'react-redux';
+import { selectConversationUnreadCount, selectAllConversationCounts } from '../../../store/notifications/notificationSlice';
 
 
 function ConversationList({ onConversationSelect, selectedConversationId }) {
@@ -21,6 +23,9 @@ function ConversationList({ onConversationSelect, selectedConversationId }) {
   const ws = useRef(null);
   const reconnectTimeoutRef = useRef(null);
   const queryClient = useQueryClient();
+  
+  // Get all conversation counts from Redux state
+  const conversationCounts = useSelector((state) => state.notifications.conversationCounts);
 
   // Pagination hook for conversations  
   // const {
@@ -85,11 +90,29 @@ function ConversationList({ onConversationSelect, selectedConversationId }) {
             const data = JSON.parse(e.data);
             
             if (data.type === 'conversation_update') {
-              // Invalidate conversations query to refetch fresh data
+              console.log('[CONVERSATION_LIST] Received conversation update:', data);
+              
+              // Force immediate invalidation and refetch for real-time ordering
               queryClient.invalidateQueries({ queryKey: ['conversations'] });
+              
+              // Immediately refetch with no delay to ensure real-time updates
+              queryClient.refetchQueries({ 
+                queryKey: ['conversations'], 
+                type: 'all' // Refetch all conversation queries
+              });
+              
+              // Also force a second refetch after a short delay to ensure consistency
+              setTimeout(() => {
+                queryClient.refetchQueries({ queryKey: ['conversations'] });
+              }, 200);
+              
             } else if (data.type === 'conversation_delete') {
+              console.log('[CONVERSATION_LIST] Received conversation delete:', data);
               // Invalidate conversations query to refetch fresh data
               queryClient.invalidateQueries({ queryKey: ['conversations'] });
+            } else if (data.type === 'pong') {
+              // Handle pong response
+              console.log('[CONVERSATION_LIST] Pong received');
             }
           } catch (err) {
             console.error('Error parsing WebSocket message:', err);
@@ -171,6 +194,14 @@ function ConversationList({ onConversationSelect, selectedConversationId }) {
     if (onConversationSelect) {
       onConversationSelect(conversation);
     }
+    
+    // Force refetch conversations to ensure proper notification state sync
+    // This helps keep server and client state in sync when switching conversations
+    setTimeout(() => {
+      queryClient.invalidateQueries({ queryKey: ['conversations'] });
+      queryClient.refetchQueries({ queryKey: ['conversations'] });
+    }, 500); // Short delay to allow navigation to complete first
+    
     navigate(`/chat/${conversation.id}`);
   };
 
@@ -308,6 +339,21 @@ function ConversationList({ onConversationSelect, selectedConversationId }) {
               // Modified Conversation List items
               filteredConversations.map((conv) => {
                 const otherParticipant = getOtherParticipant(conv.participants);
+                // Use Redux notification state as the source of truth for unread counts
+                // If Redux has data for this conversation, use it; otherwise use 0 (not server data)
+                // This ensures that when notifications are cleared in Redux, the badge disappears
+                const conversationIdStr = conv.id.toString();
+                let unreadCount = 0;
+                
+                // Check if Redux has any data for this conversation
+                if (conversationIdStr in conversationCounts) {
+                  // Redux has data for this conversation, use it
+                  unreadCount = conversationCounts[conversationIdStr];
+                } else {
+                  // Redux doesn't have data, use server data as initial fallback
+                  unreadCount = conv.unread_count || 0;
+                }
+                
                 return (
                   <div
                     key={conv.id}
@@ -324,9 +370,9 @@ function ConversationList({ onConversationSelect, selectedConversationId }) {
                           alt={otherParticipant.username}
                           size="md"
                         />
-                        {conv.unread_count > 0 && (
-                          <span className="absolute -top-1 -right-1 bg-blue-500 text-white text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center">
-                            {conv.unread_count}
+                        {unreadCount > 0 && (
+                          <span className="absolute -top-1 -right-1 bg-blue-500 text-white text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center transition-all duration-200">
+                            {unreadCount}
                           </span>
                         )}
                       </div>

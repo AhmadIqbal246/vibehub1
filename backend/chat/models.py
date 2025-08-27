@@ -11,9 +11,36 @@ class Conversation(models.Model):
     deletion_timestamps = models.JSONField(default=dict, blank=True)  # {user_id: timestamp}
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    
+    def update_timestamp(self):
+        """Update the conversation timestamp when a new message is added"""
+        from django.utils import timezone
+        self.updated_at = timezone.now()
+        self.save(update_fields=['updated_at'])
 
     def __str__(self):
         return f'Conversation: {[p.phone_number for p in self.participants.all()]}'
+    
+    def get_unread_count_for_user(self, user_profile):
+        """Get unread message count for a specific user in this conversation"""
+        return self.messages.filter(
+            recipient=user_profile,
+            is_read=False
+        ).count()
+    
+    @staticmethod
+    def get_total_unread_count_for_user(user_profile):
+        """Get total unread message count across all user's conversations"""
+        from django.db.models import Count, Q
+        return Message.objects.filter(
+            recipient=user_profile,
+            is_read=False,
+            conversation__in=Conversation.objects.filter(
+                participants=user_profile
+            ).exclude(
+                deleted_by=user_profile
+            )
+        ).count()
     
 
 class Message(models.Model):

@@ -1,6 +1,8 @@
-import React from "react";
+import React, { useEffect } from "react";
 import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router-dom";
+import { useSelector } from 'react-redux';
 import ProtectedRoute from "./store/ProtectedRoute";
+import useNotifications from './hooks/useNotifications';
 
 // Pages
 import LoginPage from "./pages/RegisterationPage/LoginPage";
@@ -17,6 +19,13 @@ import ChatInterface from "./components/chat/ChatInterface";
  * Redux Provider is handled in index.js or main.js
  */
 function App() {
+  const { isAuthenticated, isInitialized } = useSelector((state) => state.auth);
+  
+  // Only initialize notification WebSocket when user is authenticated AND auth is initialized
+  // This prevents making API calls before tokens are loaded
+  const shouldInitializeNotifications = isAuthenticated && isInitialized;
+  useNotifications({ enabled: shouldInitializeNotifications });
+  
   return (
     <Router>
       <Routes>

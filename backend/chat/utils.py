@@ -87,3 +87,71 @@ def send_conversation_delete(conversation_id, user_id):
             'conversation_id': conversation_id
         }
     )
+
+
+# Notification utility functions
+def calculate_user_total_unread_count(user_profile):
+    """Calculate total unread messages for a user across all conversations"""
+    from .models import Conversation
+    return Conversation.get_total_unread_count_for_user(user_profile)
+
+
+def send_notification_count_update(user_id, total_count, conversation_counts=None):
+    """Send real-time notification count update via WebSocket"""
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    try:
+        channel_layer = get_channel_layer()
+        
+        if not channel_layer:
+            logger.error(f"[NOTIFICATION] No channel layer available for user {user_id}")
+            return
+        
+        user_group_name = f'user_notifications_{user_id}'
+        
+        notification_data = {
+            'total_unread_count': total_count,
+            'conversation_counts': conversation_counts or {}
+        }
+        
+        async_to_sync(channel_layer.group_send)(
+            user_group_name,
+            {
+                'type': 'notification_count_update',
+                'notification_data': notification_data
+            }
+        )
+        
+        logger.info(f"[NOTIFICATION] Sent count update to user {user_id}: total={total_count}")
+        
+    except Exception as e:
+        logger.error(f"[NOTIFICATION] Failed to send count update to user {user_id}: {str(e)}")
+
+
+def broadcast_unread_count_change(user_profile, conversation_id=None):
+    """Broadcast unread count changes to user's connected clients"""
+    from .models import Conversation
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    try:
+        # Calculate total unread count
+        total_count = calculate_user_total_unread_count(user_profile)
+        
+        # Calculate individual conversation counts if needed
+        conversation_counts = {}
+        if conversation_id:
+            try:
+                conversation = Conversation.objects.get(id=conversation_id)
+                conversation_counts[str(conversation_id)] = conversation.get_unread_count_for_user(user_profile)
+            except Conversation.DoesNotExist:
+                pass
+        
+        # Send the update
+        send_notification_count_update(user_profile.user.id, total_count, conversation_counts)
+        
+        logger.info(f"[NOTIFICATION] Broadcasted count change for user {user_profile.user.username}: total={total_count}")
+        
+    except Exception as e:
+        logger.error(f"[NOTIFICATION] Failed to broadcast count change for user {user_profile.user.username}: {str(e)}")

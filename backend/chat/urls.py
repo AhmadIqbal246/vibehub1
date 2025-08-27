@@ -7,7 +7,9 @@ from .views import (
     CreateConversationView,
     EditMessageView,
     DeleteMessageView,
-    DeleteConversationView
+    DeleteConversationView,
+    UserNotificationCountView,
+    MarkConversationAsReadView
 )
 
 urlpatterns = [
@@ -18,5 +20,9 @@ urlpatterns = [
     path('create-conversation/', CreateConversationView.as_view(), name='create_conversation'),
     path('message/<int:message_id>/edit/', EditMessageView.as_view(), name='edit_message'),
     path('message/<int:message_id>/delete/', DeleteMessageView.as_view(), name='delete_message'),
-    path('conversation/<int:conversation_id>/delete/', DeleteConversationView.as_view(), name='delete_conversation')
+    path('conversation/<int:conversation_id>/delete/', DeleteConversationView.as_view(), name='delete_conversation'),
+    
+    # Notification endpoints
+    path('notifications/count/', UserNotificationCountView.as_view(), name='notification_count'),
+    path('conversation/<int:conversation_id>/mark-read/', MarkConversationAsReadView.as_view(), name='mark_conversation_read'),
 ]

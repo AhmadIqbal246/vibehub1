@@ -263,6 +263,10 @@ class ChatConsumer(AsyncWebsocketConsumer):
                 response_data["audio_data_base64"] = base64.b64encode(message.audio_data).decode('utf-8')
 
             # Email notifications are now handled automatically by Django signals
+            
+            # Broadcast notification count update to recipient
+            from .utils import broadcast_unread_count_change
+            await sync_to_async(broadcast_unread_count_change)(recipient_profile, conversation.id)
 
             # Broadcast to the group
             await self.channel_layer.group_send(
@@ -606,3 +610,99 @@ class ConversationListConsumer(AsyncWebsocketConsumer):
             'type': 'conversation_delete',
             'conversation_id': event['conversation_id']
         }))
+
+
+class NotificationConsumer(AsyncWebsocketConsumer):
+    """WebSocket consumer for real-time notification count updates"""
+    
+    async def connect(self):
+        # Get authenticated user from middleware
+        self.user = self.scope.get('user')
+        
+        if self.user and not self.user.is_anonymous:
+            # Create a unique group for this user's notification updates
+            self.user_notification_group = f'user_notifications_{self.user.id}'
+            
+            # Join user-specific notification group
+            await self.channel_layer.group_add(
+                self.user_notification_group,
+                self.channel_name
+            )
+            
+            await self.accept()
+            logger.info(f"[NOTIFICATION_WS] User {self.user.username} connected to notifications")
+        else:
+            logger.warning(f"[NOTIFICATION_WS] Unauthorized connection attempt")
+            await self.close(code=4001)  # Unauthorized
+    
+    async def disconnect(self, close_code):
+        # Leave user-specific notification group
+        if hasattr(self, 'user_notification_group'):
+            await self.channel_layer.group_discard(
+                self.user_notification_group,
+                self.channel_name
+            )
+            logger.info(f"[NOTIFICATION_WS] User {self.user.username if self.user else 'unknown'} disconnected from notifications")
+    
+    async def receive(self, text_data):
+        # Handle ping/pong and heartbeat messages
+        try:
+            data = json.loads(text_data)
+            message_type = data.get('type')
+            
+            if message_type == 'ping':
+                await self.send(text_data=json.dumps({'type': 'pong'}))
+            elif message_type == 'request_counts':
+                # Send current notification counts
+                await self.send_current_counts()
+        except json.JSONDecodeError:
+            pass
+    
+    async def send_current_counts(self):
+        """Send current notification counts to the connected client"""
+        if self.user and not self.user.is_anonymous:
+            try:
+                from .utils import calculate_user_total_unread_count
+                from .models import Conversation
+                
+                user_profile = await database_sync_to_async(lambda: self.user.userprofile)()
+                total_count = await database_sync_to_async(calculate_user_total_unread_count)(user_profile)
+                
+                # Get individual conversation counts
+                conversation_counts = {}
+                conversations = await database_sync_to_async(list)(
+                    Conversation.objects.filter(
+                        participants=user_profile
+                    ).exclude(
+                        deleted_by=user_profile
+                    )
+                )
+                
+                for conv in conversations:
+                    unread_count = await database_sync_to_async(conv.get_unread_count_for_user)(user_profile)
+                    if unread_count > 0:
+                        conversation_counts[str(conv.id)] = unread_count
+                
+                notification_data = {
+                    'total_unread_count': total_count,
+                    'conversation_counts': conversation_counts
+                }
+                
+                await self.send(text_data=json.dumps({
+                    'type': 'notification_count_update',
+                    'notification_data': notification_data
+                }))
+                
+            except Exception as e:
+                logger.error(f"[NOTIFICATION_WS] Error sending current counts: {str(e)}")
+    
+    async def notification_count_update(self, event):
+        """Send notification count update to WebSocket client"""
+        try:
+            await self.send(text_data=json.dumps({
+                'type': 'notification_count_update',
+                'notification_data': event['notification_data']
+            }))
+            logger.info(f"[NOTIFICATION_WS] Sent notification update to user {self.user.username if self.user else 'unknown'}")
+        except Exception as e:
+            logger.error(f"[NOTIFICATION_WS] Error sending notification update: {str(e)}")

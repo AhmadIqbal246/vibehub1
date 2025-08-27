@@ -57,3 +57,21 @@ def cancel_email_notification_on_read(sender, instance, created, **kwargs):
             import logging
             logger = logging.getLogger(__name__)
             logger.error(f"[SIGNAL] Failed to cancel email notifications for message {instance.id}: {str(e)}")
+
+
+@receiver(post_save, sender=Message)
+def update_conversation_timestamp(sender, instance, created, **kwargs):
+    """Update conversation timestamp when a new message is created"""
+    if created:  # Only for new messages
+        try:
+            # Update the conversation's updated_at timestamp
+            instance.conversation.update_timestamp()
+            
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.info(f"[SIGNAL] Updated conversation {instance.conversation.id} timestamp for new message {instance.id}")
+            
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"[SIGNAL] Failed to update conversation timestamp for message {instance.id}: {str(e)}")

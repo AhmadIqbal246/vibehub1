@@ -7,9 +7,9 @@ from django.views.decorators.csrf import csrf_exempt
 from django.utils.decorators import method_decorator
 from users.models import UserProfile
 from .models import Conversation, Message
-from .serializers import MessageSerializer, ConversationSerializer
+from .serializers import MessageSerializer, ConversationSerializer, NotificationCountSerializer
 from django.shortcuts import get_object_or_404
-from .utils import send_conversation_update, send_conversation_delete
+from .utils import send_conversation_update, send_conversation_delete, broadcast_unread_count_change
 from .tasks import create_and_schedule_email_notification
 import json
 import logging
@@ -83,6 +83,9 @@ class SendMessageView(APIView):
         # Send real-time conversation update to all participants
         send_conversation_update(conversation, is_new=is_new_conversation, request=request)
         
+        # Broadcast notification count update to recipient
+        broadcast_unread_count_change(recipient_profile, conversation.id)
+        
         # Serialize response data
         message_serializer = MessageSerializer(message, context={'request': request})
         conversation_serializer = ConversationSerializer(conversation, context={'request': request})
@@ -109,12 +112,15 @@ class UserConversationsView(APIView):
         # Calculate offset
         offset = (page - 1) * page_size
         
-        # Base query for conversations
+        # Base query for conversations with optimized ordering by latest message
+        from django.db.models import Max
         conversations_query = Conversation.objects.filter(
             participants=user_profile
         ).exclude(
             deleted_by=user_profile
-        ).order_by('-updated_at')
+        ).annotate(
+            latest_message_timestamp=Max('messages__timestamp')
+        ).order_by('-latest_message_timestamp', '-updated_at')
         
         # Get total count for pagination info
         total_conversations = conversations_query.count()
@@ -178,11 +184,15 @@ class ConversationMessagesView(APIView):
             
             # Mark messages as read (only for current page)
             message_ids = [msg.id for msg in messages]
-            Message.objects.filter(
+            updated_count = Message.objects.filter(
                 id__in=message_ids,
                 recipient=request.user.userprofile,
                 is_read=False
             ).update(is_read=True)
+            
+            # Broadcast notification count update if messages were marked as read
+            if updated_count > 0:
+                broadcast_unread_count_change(request.user.userprofile, conversation_id)
             
             serializer = MessageSerializer(messages, many=True, context={'request': request})
             
@@ -261,6 +271,9 @@ class SendMessageInConversationView(APIView):
             
         # Send real-time conversation update (not new, just update)
         send_conversation_update(conversation, is_new=False, request=request)
+        
+        # Broadcast notification count update to recipient
+        broadcast_unread_count_change(recipient_profile, conversation.id)
         
         serializer = MessageSerializer(message, context={'request': request})
         return Response(serializer.data, status=status.HTTP_201_CREATED)
@@ -392,3 +405,82 @@ class DeleteConversationView(APIView):
         except Exception as e:
             print(f"Error in delete_conversation: {str(e)}")
             return Response({"error": f"Server error: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# Notification-specific API views
+class UserNotificationCountView(APIView):
+    """Get total unread message count and conversation counts for user"""
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request):
+        try:
+            user_profile = request.user.userprofile
+            
+            # Calculate total unread count
+            total_unread_count = Conversation.get_total_unread_count_for_user(user_profile)
+            
+            # Calculate individual conversation counts
+            conversation_counts = {}
+            user_conversations = Conversation.objects.filter(
+                participants=user_profile
+            ).exclude(
+                deleted_by=user_profile
+            )
+            
+            for conv in user_conversations:
+                unread_count = conv.get_unread_count_for_user(user_profile)
+                if unread_count > 0:
+                    conversation_counts[str(conv.id)] = unread_count
+            
+            response_data = {
+                'total_unread_count': total_unread_count,
+                'conversation_counts': conversation_counts
+            }
+            
+            serializer = NotificationCountSerializer(response_data)
+            return Response(serializer.data)
+            
+        except Exception as e:
+            return Response(
+                {"error": f"Failed to get notification counts: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+
+class MarkConversationAsReadView(APIView):
+    """Mark all messages in a conversation as read"""
+    permission_classes = [IsAuthenticated]
+    
+    def post(self, request, conversation_id):
+        try:
+            conversation = Conversation.objects.get(
+                id=conversation_id, 
+                participants=request.user.userprofile
+            )
+            
+            # Mark all unread messages in this conversation as read
+            updated_count = Message.objects.filter(
+                conversation=conversation,
+                recipient=request.user.userprofile,
+                is_read=False
+            ).update(is_read=True)
+            
+            # Broadcast notification count update
+            broadcast_unread_count_change(request.user.userprofile, conversation_id)
+            
+            return Response({
+                "success": True,
+                "messages_marked_read": updated_count,
+                "conversation_id": conversation_id
+            })
+            
+        except Conversation.DoesNotExist:
+            return Response(
+                {"error": "Conversation not found or access denied."},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        except Exception as e:
+            return Response(
+                {"error": f"Failed to mark conversation as read: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )

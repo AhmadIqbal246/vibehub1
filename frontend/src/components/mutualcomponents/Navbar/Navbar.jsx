@@ -6,6 +6,8 @@ import { Home, Mail, Users, Settings, LogOut } from 'lucide-react';
 import Avatar from '../../common/Avatar';
 import ENV from '../../../config';
 import Popup from '../../common/Popup';
+import { selectTotalUnreadCount } from '../../../store/notifications/notificationSlice';
+import useNotifications from '../../../hooks/useNotifications';
 
 export const Navbar = () => {
   const [showTooltip, setShowTooltip] = useState(null);
@@ -13,10 +15,22 @@ export const Navbar = () => {
   const navigate = useNavigate();
   const dispatch = useDispatch();
   const { user, loading, isAuthenticated } = useSelector((state) => state.auth);
+  
+  // Initialize notifications
+  const { totalUnreadCount } = useNotifications();
+  // We can also get it directly from selector if needed
+  // const totalUnreadCount = useSelector(selectTotalUnreadCount);
 
   const navItems = [
     { id: 'dashboard', icon: Home, label: 'Dashboard', path: '/chat-dashboard', color: 'bg-indigo-500' },
-    { id: 'inbox', icon: Mail, label: 'Inbox', path: '/chat', color: 'bg-blue-500', badge: 3 },
+    { 
+      id: 'inbox', 
+      icon: Mail, 
+      label: 'Inbox', 
+      path: '/chat', 
+      color: 'bg-blue-500', 
+      badge: totalUnreadCount // Dynamic notification count from Redux
+    },
     { id: 'users', icon: Users, label: 'Users', path: '/users', color: 'bg-purple-500' },
     { id: 'settings', icon: Settings, label: 'Settings', path: '/settings', color: 'bg-teal-500' },
   ];

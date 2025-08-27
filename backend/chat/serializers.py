@@ -60,11 +60,39 @@ class ConversationSerializer(serializers.ModelSerializer):
         fields = ['id', 'participants', 'created_at', 'updated_at', 'last_message', 'unread_count']
 
     def get_last_message(self, obj):
-        last_message = obj.messages.order_by('-timestamp').first()
+        # Use select_related to optimize the query and avoid N+1 problems
+        last_message = obj.messages.select_related('sender', 'sender__userprofile', 'recipient').order_by('-timestamp').first()
         if last_message:
-            return MessageSerializer(last_message, context=self.context).data
+            return {
+                'id': last_message.id,
+                'content': last_message.content,
+                'sender_username': last_message.sender.username,
+                'timestamp': last_message.timestamp,
+                'is_read': last_message.is_read,
+                'message_type': last_message.message_type
+            }
         return None
 
     def get_unread_count(self, obj):
         user = self.context['request'].user
-        return obj.messages.filter(recipient__user=user, is_read=False).count()
+        return obj.get_unread_count_for_user(user.userprofile)
+
+
+# Notification-specific serializers
+class NotificationCountSerializer(serializers.Serializer):
+    """Serializer for notification count responses"""
+    total_unread_count = serializers.IntegerField()
+    conversation_counts = serializers.DictField(child=serializers.IntegerField())
+    
+
+class ConversationNotificationSerializer(serializers.ModelSerializer):
+    """Lightweight conversation serializer for notifications"""
+    unread_count = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = Conversation
+        fields = ['id', 'unread_count']
+    
+    def get_unread_count(self, obj):
+        user = self.context['request'].user
+        return obj.get_unread_count_for_user(user.userprofile)
