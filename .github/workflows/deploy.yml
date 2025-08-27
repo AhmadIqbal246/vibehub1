@@ -1,49 +1,49 @@
-# name: CI/CD Deploy
+name: CI/CD Deploy
 
-# on:
-#   push:
-#     branches: ["main"]
+on:
+  push:
+    branches: ["main"]
 
-# jobs:
-#   deploy:
-#     runs-on: ubuntu-latest
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
 
-#     steps:
-#       # 1. Checkout repo
-#       - name: Checkout Repo
-#         uses: actions/checkout@v4
+    steps:
+      # 1. Checkout repo
+      - name: Checkout Repo
+        uses: actions/checkout@v4
 
-#       # 2. Copy project to EC2 using rsync (supports exclude)
-#       - name: Sync project to EC2
-#         uses: burnett01/rsync-deployments@5.2
-#         with:
-#           switches: -avzr --delete --exclude='.git/' --exclude='.github/' --exclude='node_modules/' --exclude='backend/media/' --exclude='backend/staticfiles/' --exclude='.env'
-#           path: ./
-#           remote_path: ~/vibehub1
-#           remote_host: ${{ secrets.EC2_HOST }}
-#           remote_user: ${{ secrets.EC2_USER }}
-#           remote_key: ${{ secrets.EC2_KEY }}
+      # 2. Copy project to EC2 using rsync (supports exclude)
+      - name: Sync project to EC2
+        uses: burnett01/rsync-deployments@5.2
+        with:
+          switches: -avzr --delete --exclude='.git/' --exclude='.github/' --exclude='node_modules/' --exclude='backend/media/' --exclude='backend/staticfiles/' --exclude='.env'
+          path: ./
+          remote_path: ~/vibehub1
+          remote_host: ${{ secrets.EC2_HOST }}
+          remote_user: ${{ secrets.EC2_USER }}
+          remote_key: ${{ secrets.EC2_KEY }}
 
-#       # 3. SSH into EC2 and deploy with Docker Compose
-#       - name: Deploy with Docker Compose on EC2
-#         uses: appleboy/ssh-action@v0.1.10
-#         with:
-#           host: ${{ secrets.EC2_HOST }}
-#           username: ${{ secrets.EC2_USER }}
-#           key: ${{ secrets.EC2_KEY }}
-#           script: |
-#             set -e
-#             cd ~/vibehub1
-#             echo "✅ Files synced to EC2"
+      # 3. SSH into EC2 and deploy with Docker Compose
+      - name: Deploy with Docker Compose on EC2
+        uses: appleboy/ssh-action@v0.1.10
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_KEY }}
+          script: |
+            set -e
+            cd ~/vibehub1
+            echo "✅ Files synced to EC2"
 
-#             # Ensure root-level .env file exists (Compose auto-loads it)
-#             if [ ! -f .env ]; then
-#               echo "ERROR: .env not found in ~/vibehub1 (same directory as docker-compose.yml)" >&2
-#               exit 1
-#             fi
+            # Ensure root-level .env file exists (Compose auto-loads it)
+            if [ ! -f .env ]; then
+              echo "ERROR: .env not found in ~/vibehub1 (same directory as docker-compose.yml)" >&2
+              exit 1
+            fi
 
-#             # Restart containers
-#             docker-compose down
-#             docker-compose up -d --build
-#             docker-compose ps
-#             echo "🚀 Deployment finished"
+            # Restart containers
+            docker-compose down
+            docker-compose up -d --build
+            docker-compose ps
+            echo "🚀 Deployment finished"

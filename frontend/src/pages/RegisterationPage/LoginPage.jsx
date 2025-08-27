@@ -129,14 +129,14 @@ const LoginPage = () => {
           />
 
           {error && (
-            <p className="text-red-600 text-sm text-center flex items-center justify-center gap-2">
+            <p className="text-black-600 text-sm text-center flex items-center justify-center gap-2">
               {error}
             </p>
           )}
 
           <button
             type="submit"
-            className="w-full flex items-center justify-center bg-red-600 text-white py-3 rounded-lg hover:bg-indigo-700 transition duration-300 transform hover:-translate-y-1 shadow-lg hover:shadow-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
+            className="w-full flex items-center justify-center bg-blue-600 text-white py-3 rounded-lg hover:bg-indigo-700 transition duration-300 transform hover:-translate-y-1 shadow-lg hover:shadow-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
             disabled={loading}
           >
             {loading ? (
