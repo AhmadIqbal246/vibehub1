@@ -68,7 +68,9 @@ function ConversationList({ onConversationSelect, selectedConversationId }) {
     const connectConversationWebSocket = () => {
       try {
         const wsScheme = window.location.protocol === "https:" ? "wss" : "ws";
-        const wsUrl = `${wsScheme}://localhost:8000/ws/conversations/`;
+        // Get JWT token from localStorage and add it as query parameter
+        const token = localStorage.getItem('access_token');
+        const wsUrl = `${wsScheme}://localhost:8000/ws/conversations/${token ? `?token=${token}` : ''}`;
         
         ws.current = new WebSocket(wsUrl);
         

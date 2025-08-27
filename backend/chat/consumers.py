@@ -16,6 +16,13 @@ from rest_framework_simplejwt.tokens import UntypedToken
 from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
 from urllib.parse import parse_qs
 from .tasks import create_and_schedule_email_notification, cancel_pending_notifications_for_message
+import logging
+import traceback
+import asyncio
+
+# Set up logger for tracking async context errors
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
 
 # JWT authentication is now handled by middleware
 
@@ -64,7 +71,11 @@ def get_conversation_by_id(conversation_id):
 
 @database_sync_to_async
 def get_message_by_id(message_id):
-    return get_object_or_404(Message, id=message_id)
+    try:
+        # Use select_related to preload the sender and recipient to avoid async context errors
+        return Message.objects.select_related('sender', 'recipient', 'recipient__user').get(id=message_id)
+    except Message.DoesNotExist:
+        raise Message.DoesNotExist(f"Message with id {message_id} does not exist")
 
 @database_sync_to_async
 def update_message_content(message, content):
@@ -72,7 +83,7 @@ def update_message_content(message, content):
     message.save()
 
 @database_sync_to_async
-def delete_message(message):
+def delete_message_from_db(message):
     message.delete()
 
 @database_sync_to_async
@@ -302,16 +313,19 @@ class ChatConsumer(AsyncWebsocketConsumer):
                 }))
                 return
                 
+            # Store message data before update for response
+            stored_timestamp = message.timestamp.isoformat()
+            
             # Update the message
             await update_message_content(message, content)
             
-            # Prepare response data
+            # Prepare response data using stored values
             response_data = {
                 'action_type': 'edit',
                 'id': message_id,
                 'content': content.strip(),
                 'sender_username': sender_username,
-                'timestamp': message.timestamp.isoformat(),
+                'timestamp': stored_timestamp,
                 'message_type': 'text'
             }
             
@@ -325,10 +339,14 @@ class ChatConsumer(AsyncWebsocketConsumer):
             )
             
         except User.DoesNotExist:
+            logger.error(f"[EDIT] User not found: {sender_username}")
             await self.send(text_data=json.dumps({'error': 'User not found'}))
         except Message.DoesNotExist:
+            logger.error(f"[EDIT] Message not found: {message_id}")
             await self.send(text_data=json.dumps({'error': 'Message not found'}))
         except Exception as e:
+            logger.error(f"[EDIT] CRITICAL ERROR in edit_message: {str(e)}")
+            logger.error(f"[EDIT] Full traceback:\n{traceback.format_exc()}")
             await self.send(text_data=json.dumps({'error': str(e)}))
     
     async def delete_message(self, data):
@@ -354,14 +372,18 @@ class ChatConsumer(AsyncWebsocketConsumer):
                 }))
                 return
                 
-            # Delete the message
-            await delete_message(message)
+            # Store message data before deletion to avoid accessing deleted object
+            stored_message_id = message.id
+            stored_sender_username = message.sender.username
             
-            # Prepare response data
+            # Delete the message
+            await delete_message_from_db(message)
+            
+            # Prepare response data using stored values
             response_data = {
                 'action_type': 'delete',
-                'id': message_id,
-                'sender_username': sender_username
+                'id': stored_message_id,
+                'sender_username': stored_sender_username
             }
             
             # Broadcast to the group
@@ -374,10 +396,14 @@ class ChatConsumer(AsyncWebsocketConsumer):
             )
             
         except User.DoesNotExist:
+            logger.error(f"[DELETE] User not found: {sender_username}")
             await self.send(text_data=json.dumps({'error': 'User not found'}))
         except Message.DoesNotExist:
+            logger.error(f"[DELETE] Message not found: {message_id}")
             await self.send(text_data=json.dumps({'error': 'Message not found'}))
         except Exception as e:
+            logger.error(f"[DELETE] CRITICAL ERROR in delete_message: {str(e)}")
+            logger.error(f"[DELETE] Full traceback:\n{traceback.format_exc()}")
             await self.send(text_data=json.dumps({'error': str(e)}))
     
     async def handle_typing(self, data):
@@ -554,11 +580,24 @@ class ConversationListConsumer(AsyncWebsocketConsumer):
     # Handle conversation updates
     async def conversation_update(self, event):
         """Send conversation update to WebSocket"""
-        await self.send(text_data=json.dumps({
-            'type': 'conversation_update',
-            'conversation': event['conversation'],
-            'is_new': event.get('is_new', False)
-        }))
+        try:
+            conversation_id = event['conversation'].get('id', 'unknown')
+            is_new = event.get('is_new', False)
+            user_id = getattr(self.user, 'id', 'unknown')
+            
+            logger.info(f"[WEBSOCKET] Sending conversation update to user {self.user.username if self.user else 'anonymous'} (ID: {user_id}) for conversation {conversation_id}, is_new: {is_new}")
+            
+            await self.send(text_data=json.dumps({
+                'type': 'conversation_update',
+                'conversation': event['conversation'],
+                'is_new': is_new
+            }))
+            
+            logger.info(f"[WEBSOCKET] Successfully sent conversation update to user {self.user.username if self.user else 'anonymous'}")
+            
+        except Exception as e:
+            logger.error(f"[WEBSOCKET] Error sending conversation update to user {self.user.username if self.user else 'anonymous'}: {str(e)}")
+            logger.error(f"[WEBSOCKET] Conversation update error traceback:\n{traceback.format_exc()}")
     
     # Handle conversation deletion
     async def conversation_delete(self, event):

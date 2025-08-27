@@ -12,6 +12,8 @@ from django.shortcuts import get_object_or_404
 from .utils import send_conversation_update, send_conversation_delete
 from .tasks import create_and_schedule_email_notification
 import json
+import logging
+import traceback
 from django.utils import timezone
 class SendMessageView(APIView):
     permission_classes = [IsAuthenticated]
@@ -267,29 +269,58 @@ class CreateConversationView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
+        import logging
+        logger = logging.getLogger(__name__)
+        
         user_profile = request.user.userprofile
         recipient_phone = request.data.get("recipient_phone")
+        
+        logger.info(f"[CONVERSATION CREATE] User {request.user.username} (ID: {request.user.id}) creating conversation with phone: {recipient_phone}")
+        
         if not recipient_phone:
+            logger.error(f"[CONVERSATION CREATE] Missing recipient phone for user {request.user.username}")
             return Response({"error": "Recipient phone is required."}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
             recipient_profile = UserProfile.objects.get(phone_number=recipient_phone)
+            logger.info(f"[CONVERSATION CREATE] Found recipient: {recipient_profile.user.username} (ID: {recipient_profile.user.id})")
         except UserProfile.DoesNotExist:
+            logger.error(f"[CONVERSATION CREATE] Recipient with phone {recipient_phone} not found")
             return Response({"error": "Recipient not found."}, status=status.HTTP_404_NOT_FOUND)
 
         # Check if conversation already exists
+        logger.info(f"[CONVERSATION CREATE] Checking if conversation exists between {user_profile.user.username} and {recipient_profile.user.username}")
         conversation = (
             Conversation.objects
             .filter(participants=user_profile)
             .filter(participants=recipient_profile)
             .first()
         )
+        
+        is_new_conversation = False
         if not conversation:
+            logger.info(f"[CONVERSATION CREATE] Creating new conversation between {user_profile.user.username} and {recipient_profile.user.username}")
             conversation = Conversation.objects.create()
             conversation.participants.add(user_profile, recipient_profile)
             conversation.save()
+            is_new_conversation = True
+            logger.info(f"[CONVERSATION CREATE] New conversation created with ID: {conversation.id}")
+        else:
+            logger.info(f"[CONVERSATION CREATE] Existing conversation found with ID: {conversation.id}")
+
+        # Send real-time conversation update to all participants if it's a new conversation
+        if is_new_conversation:
+            logger.info(f"[CONVERSATION CREATE] Sending real-time update for new conversation {conversation.id}")
+            try:
+                send_conversation_update(conversation, is_new=True, request=request)
+                logger.info(f"[CONVERSATION CREATE] Real-time update sent successfully for conversation {conversation.id}")
+            except Exception as e:
+                logger.error(f"[CONVERSATION CREATE] Failed to send real-time update for conversation {conversation.id}: {str(e)}")
+                logger.error(f"[CONVERSATION CREATE] Real-time update error traceback: {traceback.format_exc()}")
+                # Don't fail the request, just log the error
 
         serializer = ConversationSerializer(conversation, context={'request': request})
+        logger.info(f"[CONVERSATION CREATE] Returning conversation data for ID: {conversation.id}, is_new: {is_new_conversation}")
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
 class EditMessageView(APIView):

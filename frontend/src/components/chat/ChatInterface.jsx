@@ -377,7 +377,7 @@ function ChatInterface({
         setContent("");
         setAudioBlob(null);
         
-        // Instead of navigating, update the current state
+          // Instead of navigating, update the current state
         if (res.data && res.data.conversation_id) {
           // Set the conversation and connect WebSocket
           const conversationData = res.data.conversation;
@@ -398,6 +398,11 @@ function ChatInterface({
           }
           if (onConversationSelect) {
             onConversationSelect(conversationData);
+          }
+          
+          // Trigger a global conversation list update for real-time display
+          if (typeof window.updateConversationList === 'function') {
+            window.updateConversationList('new_conversation', conversationData);
           }
         }
       } catch (err) {
